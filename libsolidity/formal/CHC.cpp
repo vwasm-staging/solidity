@@ -120,7 +120,6 @@ void CHC::endVisit(ContractDefinition const& _contract)
 	auto implicitConstructor = (*implicitConstructorPredicate)({});
 	addRule(implicitConstructor, implicitConstructor.name);
 	m_currentBlock = implicitConstructor;
-	m_context.addAssertion(m_error.currentValue() == 0);
 
 	if (auto constructor = _contract.constructor())
 		constructor->accept(*this);
@@ -723,6 +722,7 @@ void CHC::clearIndices(ContractDefinition const* _contract, FunctionDefinition c
 		for (auto const& var: _function->localVariables())
 			m_context.variable(*var)->increaseIndex();
 	}
+	m_error.resetIndex();
 }
 
 void CHC::setCurrentBlock(
