@@ -80,6 +80,7 @@ public:
 	smtutil::Expression tx(unsigned _idx);
 	smtutil::SortPointer txSort();
 	void newTx();
+	void addTxConstraints(FunctionDefinition const& _function);
 
 	/// @returns the symbolic balances.
 	smtutil::Expression balances();

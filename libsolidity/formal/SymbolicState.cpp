@@ -153,6 +153,29 @@ void SymbolicState::newTx()
 	m_txTuple->increaseIndex();
 }
 
+void SymbolicState::addTxConstraints(FunctionDefinition const& _function)
+{
+	smt::setSymbolicUnknownValue(txMember("block.coinbase"), TypeProvider::uint(160), m_context);
+	smt::setSymbolicUnknownValue(txMember("msg.sender"), TypeProvider::uint(160), m_context);
+	smt::setSymbolicUnknownValue(txMember("tx.origin"), TypeProvider::uint(160), m_context);
+
+	if (_function.isPartOfExternalInterface())
+	{
+		auto sig = TypeProvider::function(_function)->externalIdentifier();
+		m_context.addAssertion(txMember("msg.sig") == sig);
+
+		auto b0 = sig >> (3 * 8);
+		auto b1 = (sig & 0x00ff0000) >> (2 * 8);
+		auto b2 = (sig & 0x0000ff00) >> (1 * 8);
+		auto b3 = (sig & 0x000000ff);
+		auto data = smtutil::Expression::tuple_get(txMember("msg.data"), 0);
+		m_context.addAssertion(smtutil::Expression::select(data, 0) == b0);
+		m_context.addAssertion(smtutil::Expression::select(data, 1) == b1);
+		m_context.addAssertion(smtutil::Expression::select(data, 2) == b2);
+		m_context.addAssertion(smtutil::Expression::select(data, 3) == b3);
+	}
+}
+
 smtutil::Expression SymbolicState::balances()
 {
 	return m_stateTuple->component(m_stateComponentIndices.at("balances"));
