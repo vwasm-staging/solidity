@@ -37,7 +37,20 @@ class SymbolicArrayVariable;
  * - state, represented as a tuple of:
  *   - balances
  *   - TODO: potentially storage of contracts
- * - TODO transaction variables
+ * - block and transaction properties, represented as a tuple of:
+ *   - blockhash
+ *   - block coinbase
+ *   - block difficulty
+ *   - block gaslimit
+ *   - block number
+ *   - block timestamp
+ *   - TODO gasleft
+ *   - msg data
+ *   - msg sender
+ *   - msg sig
+ *   - msg value
+ *   - tx gasprice
+ *   - tx origin
  */
 class SymbolicState
 {
@@ -62,6 +75,12 @@ public:
 	smtutil::SortPointer stateSort();
 	void newState();
 
+	/// @returns the tx data as a tuple.
+	smtutil::Expression tx();
+	smtutil::Expression tx(unsigned _idx);
+	smtutil::SortPointer txSort();
+	void newTx();
+
 	/// @returns the symbolic balances.
 	smtutil::Expression balances();
 	/// @returns the symbolic balance of address `this`.
@@ -69,10 +88,12 @@ public:
 	/// @returns the symbolic balance of an address.
 	smtutil::Expression balance(smtutil::Expression _address);
 
+	smtutil::Expression blockhash(smtutil::Expression _blockNumber);
+	smtutil::Expression txMember(std::string const& _member);
+
 	/// Transfer _value from _from to _to.
 	void transfer(smtutil::Expression _from, smtutil::Expression _to, smtutil::Expression _value);
 	//@}
-
 
 private:
 	/// Adds _value to _account's balance.
@@ -95,10 +116,15 @@ private:
 		m_context
 	};
 
-	std::map<std::string, unsigned> m_componentIndices;
+	std::map<std::string, unsigned> m_stateComponentIndices;
 	/// balances, TODO storage of other contracts
 	std::map<std::string, smtutil::SortPointer> m_stateMembers;
 	std::unique_ptr<SymbolicTupleVariable> m_stateTuple;
+
+	std::map<std::string, unsigned> m_txComponentIndices;
+	std::map<std::string, smtutil::SortPointer> m_txMembers;
+	std::unique_ptr<SymbolicTupleVariable> m_txTuple;
+
 };
 
 }

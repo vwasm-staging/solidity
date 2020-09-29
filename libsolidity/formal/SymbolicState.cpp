@@ -29,6 +29,7 @@ using namespace solidity::frontend::smt;
 SymbolicState::SymbolicState(EncodingContext& _context):
 	m_context(_context)
 {
+	/// Build state tuple.
 	m_stateMembers.emplace("balances", make_shared<smtutil::ArraySort>(smtutil::SortProvider::uintSort, smtutil::SortProvider::uintSort));
 
 	unsigned i = 0;
@@ -38,11 +39,41 @@ SymbolicState::SymbolicState(EncodingContext& _context):
 	{
 		members.emplace_back(component);
 		sorts.emplace_back(sort);
-		m_componentIndices[component] = i++;
+		m_stateComponentIndices[component] = i++;
 	}
 	m_stateTuple = make_unique<SymbolicTupleVariable>(
 		make_shared<smtutil::TupleSort>("state_type", members, sorts),
 		"state",
+		m_context
+	);
+
+	/// Build tx tuple.
+	m_txMembers.emplace("blockhash", make_shared<smtutil::ArraySort>(smtutil::SortProvider::uintSort, smtutil::SortProvider::uintSort));
+	m_txMembers.emplace("block.coinbase", smt::smtSort(*TypeProvider::address()));
+	m_txMembers.emplace("block.difficulty", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("block.gaslimit", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("block.number", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("block.timestamp", smtutil::SortProvider::uintSort);
+	// TODO gasleft
+	m_txMembers.emplace("msg.data", smt::smtSort(*TypeProvider::bytesMemory()));
+	m_txMembers.emplace("msg.sender", smt::smtSort(*TypeProvider::address()));
+	m_txMembers.emplace("msg.sig", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("msg.value", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("tx.gasprice", smtutil::SortProvider::uintSort);
+	m_txMembers.emplace("tx.origin", smtutil::SortProvider::uintSort);
+
+	i = 0;
+	members.clear();
+	sorts.clear();
+	for (auto const& [component, sort]: m_txMembers)
+	{
+		members.emplace_back(component);
+		sorts.emplace_back(sort);
+		m_txComponentIndices[component] = i++;
+	}
+	m_txTuple = make_unique<SymbolicTupleVariable>(
+		make_shared<smtutil::TupleSort>("tx_type", members, sorts),
+		"tx",
 		m_context
 	);
 }
@@ -52,6 +83,7 @@ void SymbolicState::reset()
 	m_error.resetIndex();
 	m_thisAddress.resetIndex();
 	m_stateTuple->resetIndex();
+	m_txTuple->resetIndex();
 }
 
 // Blockchain
@@ -101,9 +133,29 @@ void SymbolicState::newState()
 	m_stateTuple->increaseIndex();
 }
 
+smtutil::Expression SymbolicState::tx()
+{
+	return m_txTuple->currentValue();
+}
+
+smtutil::Expression SymbolicState::tx(unsigned _idx)
+{
+	return m_txTuple->valueAtIndex(_idx);
+}
+
+SortPointer SymbolicState::txSort()
+{
+	return m_txTuple->sort();
+}
+
+void SymbolicState::newTx()
+{
+	m_txTuple->increaseIndex();
+}
+
 smtutil::Expression SymbolicState::balances()
 {
-	return m_stateTuple->component(m_componentIndices.at("balances"));
+	return m_stateTuple->component(m_stateComponentIndices.at("balances"));
 }
 
 smtutil::Expression SymbolicState::balance()
@@ -114,6 +166,16 @@ smtutil::Expression SymbolicState::balance()
 smtutil::Expression SymbolicState::balance(smtutil::Expression _address)
 {
 	return smtutil::Expression::select(balances(), move(_address));
+}
+
+smtutil::Expression SymbolicState::blockhash(smtutil::Expression _blockNumber)
+{
+	return smtutil::Expression::select(txMember("blockhash"), move(_blockNumber));
+}
+
+smtutil::Expression SymbolicState::txMember(string const& _member)
+{
+	return m_txTuple->component(m_txComponentIndices.at(_member));
 }
 
 void SymbolicState::transfer(smtutil::Expression _from, smtutil::Expression _to, smtutil::Expression _value)
@@ -152,7 +214,7 @@ smtutil::Expression SymbolicState::assignStateMember(string const& _member, smtu
 		if (member.first == _member)
 			args.emplace_back(_value);
 		else
-			args.emplace_back(m_stateTuple->component(m_componentIndices.at(member.first)));
+			args.emplace_back(m_stateTuple->component(m_stateComponentIndices.at(member.first)));
 	m_stateTuple->increaseIndex();
 	auto tuple = m_stateTuple->currentValue();
 	auto sortExpr = smtutil::Expression(make_shared<smtutil::SortSort>(tuple.sort), tuple.name);
