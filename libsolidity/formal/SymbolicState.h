@@ -82,6 +82,12 @@ public:
 	void newTx();
 	void addTxConstraints(FunctionDefinition const& _function);
 
+	/// @returns the crypto functions as a tuple.
+	smtutil::Expression crypto();
+	smtutil::Expression crypto(unsigned _idx);
+	smtutil::SortPointer cryptoSort();
+	void newCrypto();
+
 	/// @returns the symbolic balances.
 	smtutil::Expression balances();
 	/// @returns the symbolic balance of address `this`.
@@ -91,6 +97,8 @@ public:
 
 	smtutil::Expression blockhash(smtutil::Expression _blockNumber);
 	smtutil::Expression txMember(std::string const& _member);
+
+	smtutil::Expression cryptoFunction(std::string const& _member);
 
 	/// Transfer _value from _from to _to.
 	void transfer(smtutil::Expression _from, smtutil::Expression _to, smtutil::Expression _value);
@@ -126,6 +134,9 @@ private:
 	std::map<std::string, smtutil::SortPointer> m_txMembers;
 	std::unique_ptr<SymbolicTupleVariable> m_txTuple;
 
+	std::map<std::string, unsigned> m_cryptoComponentIndices;
+	std::map<std::string, smtutil::SortPointer> m_cryptoMembers;
+	std::unique_ptr<SymbolicTupleVariable> m_cryptoTuple;
 };
 
 }

@@ -76,6 +76,35 @@ SymbolicState::SymbolicState(EncodingContext& _context):
 		"tx",
 		m_context
 	);
+
+	/// Build crypto functions tuple.
+	SortPointer bytesSort = smtSort(*TypeProvider::bytesStorage());
+	SortPointer bytes32Sort = smtSort(*TypeProvider::fixedBytes(32));
+	m_cryptoMembers.emplace("keccak256", make_shared<smtutil::ArraySort>(bytesSort, bytes32Sort));
+	m_cryptoMembers.emplace("sha256", make_shared<smtutil::ArraySort>(bytesSort, bytes32Sort));
+	m_cryptoMembers.emplace("ripemd160", make_shared<smtutil::ArraySort>(bytesSort, smtSort(*TypeProvider::fixedBytes(20))));
+	m_cryptoMembers.emplace("ripemd160", make_shared<smtutil::ArraySort>(bytesSort, smtSort(*TypeProvider::fixedBytes(20))));
+	SortPointer ecrecoverInputSort = make_shared<TupleSort>(
+		"ecrecover_input_type",
+		vector<string>{"hash", "v", "r", "s"},
+		vector<SortPointer>{bytes32Sort, smtSort(*TypeProvider::uint(8)), bytes32Sort, bytes32Sort}
+	);
+	m_cryptoMembers.emplace("ecrecover", make_shared<smtutil::ArraySort>(ecrecoverInputSort, smtSort(*TypeProvider::address())));
+
+	i = 0;
+	members.clear();
+	sorts.clear();
+	for (auto const& [component, sort]: m_cryptoMembers)
+	{
+		members.emplace_back(component);
+		sorts.emplace_back(sort);
+		m_cryptoComponentIndices[component] = i++;
+	}
+	m_cryptoTuple = make_unique<SymbolicTupleVariable>(
+		make_shared<smtutil::TupleSort>("crypto_functions_type", members, sorts),
+		"crypto_functions",
+		m_context
+	);
 }
 
 void SymbolicState::reset()
@@ -176,6 +205,26 @@ void SymbolicState::addTxConstraints(FunctionDefinition const& _function)
 	}
 }
 
+smtutil::Expression SymbolicState::crypto()
+{
+	return m_cryptoTuple->currentValue();
+}
+
+smtutil::Expression SymbolicState::crypto(unsigned _idx)
+{
+	return m_cryptoTuple->valueAtIndex(_idx);
+}
+
+SortPointer SymbolicState::cryptoSort()
+{
+	return m_cryptoTuple->sort();
+}
+
+void SymbolicState::newCrypto()
+{
+	m_cryptoTuple->increaseIndex();
+}
+
 smtutil::Expression SymbolicState::balances()
 {
 	return m_stateTuple->component(m_stateComponentIndices.at("balances"));
@@ -199,6 +248,11 @@ smtutil::Expression SymbolicState::blockhash(smtutil::Expression _blockNumber)
 smtutil::Expression SymbolicState::txMember(string const& _member)
 {
 	return m_txTuple->component(m_txComponentIndices.at(_member));
+}
+
+smtutil::Expression SymbolicState::cryptoFunction(string const& _member)
+{
+	return m_cryptoTuple->component(m_cryptoComponentIndices.at(_member));
 }
 
 void SymbolicState::transfer(smtutil::Expression _from, smtutil::Expression _to, smtutil::Expression _value)
