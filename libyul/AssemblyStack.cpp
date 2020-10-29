@@ -40,8 +40,6 @@
 #include <libyul/ObjectParser.h>
 #include <libyul/optimiser/Suite.h>
 
-#include <libsolidity/interface/OptimiserSettings.h>
-
 #include <libevmasm/Assembly.h>
 #include <liblangutil/Scanner.h>
 #include <optional>
@@ -230,6 +228,8 @@ std::pair<MachineAssemblyObject, MachineAssemblyObject> AssemblyStack::assembleW
 	evmasm::Assembly assembly;
 	EthAssemblyAdapter adapter(assembly);
 	compileEVM(adapter, m_optimiserSettings.optimizeStackAllocation);
+
+	assembly.optimise(evmasm::Assembly::OptimiserSettings::translate(m_optimiserSettings, m_evmVersion));
 
 	MachineAssemblyObject creationObject;
 	creationObject.bytecode = make_shared<evmasm::LinkerObject>(assembly.assemble());
