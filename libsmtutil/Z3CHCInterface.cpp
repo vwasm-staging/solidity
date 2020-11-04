@@ -40,8 +40,6 @@ Z3CHCInterface::Z3CHCInterface(optional<unsigned> _queryTimeout):
 		m_context->set("timeout", int(*m_queryTimeout));
 	else
 		z3::set_param("rlimit", Z3Interface::resourceLimit);
-
-	setSpacerOptions();
 }
 
 void Z3CHCInterface::declareVariable(string const& _name, SortPointer const& _sort)
@@ -71,6 +69,34 @@ void Z3CHCInterface::addRule(Expression const& _expr, string const& _name)
 }
 
 pair<CheckResult, CHCSolverInterface::CexGraph> Z3CHCInterface::query(Expression const& _expr)
+{
+	Strategy quantifierAndAbstraction = m_quantifierStrategy;
+	quantifierAndAbstraction.merge(Strategy{m_abstractionStrategy});
+	CheckResult finalResult = CheckResult::UNKNOWN;
+	for (auto const& s: set<Strategy>{m_quantifierStrategy, quantifierAndAbstraction})
+	{
+		applyStrategy(s);
+		setPreProcessing(true);
+		auto [result, cex] = singleQuery(_expr);
+		if (result == CheckResult::UNSATISFIABLE)
+			return {result, cex};
+		if (result == CheckResult::SATISFIABLE)
+		{
+			setPreProcessing(false);
+			auto [resultSat, cexSat] = singleQuery(_expr);
+			if (resultSat == CheckResult::SATISFIABLE)
+				return {resultSat, cexSat};
+			if (resultSat == CheckResult::UNSATISFIABLE)
+				return {CheckResult::CONFLICTING, {}};
+		}
+		if (finalResult != CheckResult::SATISFIABLE)
+			finalResult = result;
+		removeStrategy(s);
+	}
+	return {finalResult, {}};
+}
+
+pair<CheckResult, CHCSolverInterface::CexGraph> Z3CHCInterface::singleQuery(Expression const& _expr)
 {
 	CheckResult result;
 	CHCSolverInterface::CexGraph cex;
@@ -118,26 +144,61 @@ pair<CheckResult, CHCSolverInterface::CexGraph> Z3CHCInterface::query(Expression
 	return {result, cex};
 }
 
-void Z3CHCInterface::setSpacerOptions(bool _preProcessing)
+string const Z3CHCInterface::m_useQGenStr{"fp.spacer.q3.use_qgen"};
+string const Z3CHCInterface::m_mbqiStr{"fp.spacer.mbqi"};
+string const Z3CHCInterface::m_groundPobsStr{"fp.spacer.ground_pobs"};
+string const Z3CHCInterface::m_weakAbsStr{"fp.spacer.weak_abs"};
+
+/// These are useful for solving problems with arrays and loops.
+Z3CHCInterface::Strategy const Z3CHCInterface::m_quantifierStrategy{
+	/// Use quantified lemma generalizer.
+	{m_useQGenStr, true},
+	{m_mbqiStr, false},
+	/// Do not ground pobs by using values from a model.
+	{m_groundPobsStr, false}
+};
+
+Z3CHCInterface::Strategy const Z3CHCInterface::m_groundStrategy{
+	{m_useQGenStr, !m_quantifierStrategy.at(m_useQGenStr)},
+	{m_mbqiStr, !m_quantifierStrategy.at(m_mbqiStr)},
+	{m_groundPobsStr, !m_quantifierStrategy.at(m_groundPobsStr)}
+};
+
+Z3CHCInterface::Strategy const Z3CHCInterface::m_abstractionStrategy{
+	{m_weakAbsStr, false}
+};
+
+void Z3CHCInterface::applyStrategy(Strategy const& _strategy)
 {
 	// Spacer options.
 	// These needs to be set in the solver.
 	// https://github.com/Z3Prover/z3/blob/master/src/muz/base/fp_params.pyg
 	z3::params p(*m_context);
-	// These are useful for solving problems with arrays and loops.
-	// Use quantified lemma generalizer.
-	p.set("fp.spacer.q3.use_qgen", true);
-	p.set("fp.spacer.mbqi", false);
-	// Ground pobs by using values from a model.
-	p.set("fp.spacer.ground_pobs", false);
+	for (auto const& [param, value]: _strategy)
+		p.set(param.c_str(), value);
+	m_solver.set(p);
+}
 
+void Z3CHCInterface::removeStrategy(Strategy const& _strategy)
+{
+	// Spacer options.
+	// These needs to be set in the solver.
+	// https://github.com/Z3Prover/z3/blob/master/src/muz/base/fp_params.pyg
+	z3::params p(*m_context);
+	for (auto const& [param, value]: _strategy)
+		p.set(param.c_str(), !value);
+	m_solver.set(p);
+}
+
+void Z3CHCInterface::setPreProcessing(bool _preProcessing)
+{
+	z3::params p(*m_context);
 	// Spacer optimization should be
 	// - enabled for better solving (default)
 	// - disable for counterexample generation
 	p.set("fp.xform.slice", _preProcessing);
 	p.set("fp.xform.inline_linear", _preProcessing);
 	p.set("fp.xform.inline_eager", _preProcessing);
-
 	m_solver.set(p);
 }
 

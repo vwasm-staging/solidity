@@ -46,9 +46,9 @@ public:
 
 	Z3Interface* z3Interface() const { return m_z3Interface.get(); }
 
-	void setSpacerOptions(bool _preProcessing = true);
-
 private:
+	std::pair<CheckResult, CexGraph> singleQuery(Expression const& _expr);
+
 	/// Constructs a nonlinear counterexample graph from the refutation.
 	CHCSolverInterface::CexGraph cexGraph(z3::expr const& _proof);
 	/// @returns the fact from a proof node.
@@ -57,6 +57,22 @@ private:
 	std::string name(z3::expr const& _predicate);
 	/// @returns the arguments of @a _predicate.
 	std::vector<std::string> arguments(z3::expr const& _predicate);
+
+	//{@
+	/// Strategy actions and data.
+	using Strategy = std::map<std::string, bool>;
+
+	void applyStrategy(Strategy const& _strategy);
+	void removeStrategy(Strategy const& _strategy);
+	void setPreProcessing(bool _preProcessing);
+
+	static std::string const m_useQGenStr;
+	static std::string const m_mbqiStr;
+	static std::string const m_groundPobsStr;
+	static std::string const m_weakAbsStr;
+	static Strategy const m_quantifierStrategy;
+	static Strategy const m_groundStrategy;
+	static Strategy const m_abstractionStrategy;
 
 	// Used to handle variables.
 	std::unique_ptr<Z3Interface> m_z3Interface;
