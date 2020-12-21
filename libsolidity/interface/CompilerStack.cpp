@@ -1353,11 +1353,34 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 
 	// TODO: support passing metadata
 	// TODO: use stack.assemble here!
-	yul::MachineAssemblyObject init;
-	yul::MachineAssemblyObject runtime;
-	std::tie(init, runtime) = stack.assembleWithDeployed(IRNames::deployedObject(_contract));
-	compiledContract.object = std::move(*init.bytecode);
-	compiledContract.runtimeObject = std::move(*runtime.bytecode);
+	compiledContract.evmAssembly = stack.assembleEVM();
+	solAssert(compiledContract.evmAssembly, "");
+	try
+	{
+		// Assemble deployment (incl. runtime)  object.
+		compiledContract.object = compiledContract.evmAssembly->assemble();
+	}
+	catch(evmasm::AssemblyException const&)
+	{
+		solAssert(false, "Assembly exception for bytecode");
+	}
+	solAssert(compiledContract.object.immutableReferences.empty(), "Leftover immutables.");
+
+	if (compiledContract.evmAssembly->numSubs() == 1)
+	{
+		compiledContract.evmRuntimeAssembly = make_shared<evmasm::Assembly>(compiledContract.evmAssembly->sub(0));
+		solAssert(compiledContract.evmRuntimeAssembly, "");
+		try
+		{
+			// Assemble runtime object.
+			compiledContract.runtimeObject = compiledContract.evmRuntimeAssembly->assemble();
+		}
+		catch(evmasm::AssemblyException const&)
+		{
+			solAssert(false, "Assembly exception for deployed bytecode");
+		}
+	}
+
 	// TODO: refactor assemblyItems, runtimeAssemblyItems, generatedSources,
 	//       assemblyString, assemblyJSON, and functionEntryPoints to work with this code path
 
