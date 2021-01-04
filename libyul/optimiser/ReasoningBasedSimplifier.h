@@ -67,7 +67,8 @@ private:
 		Expression const& _expression
 	);
 
-	virtual smtutil::Expression encodeEVMBuiltin(
+	void handleDeclaration(
+		YulString _varName,
 		evmasm::Instruction _instruction,
 		std::vector<Expression> const& _arguments
 	);
@@ -75,22 +76,34 @@ private:
 	smtutil::Expression int2bv(smtutil::Expression _arg) const;
 	smtutil::Expression bv2int(smtutil::Expression _arg) const;
 
-	smtutil::Expression newVariable();
-	virtual smtutil::Expression newRestrictedVariable();
+	smtutil::Expression newVariable(std::string const& _name = {});
+	smtutil::Expression newRestrictedVariable(std::string const& _name = {});
 	std::string uniqueName();
+
+	bool makesInfeasible(smtutil::Expression _constraint);
+	bool feasible();
+	bool infeasible();
+
+	// Add a boolean variable and check whether it is constant true or constant false.
+	// @param _value the value of the variable.
+	// @param _negations a disjunction of expressions representing the negation of _value.
+	void tryAddBoolean(YulString _varName, smtutil::Expression _value, std::vector<smtutil::Expression> const& _negations);
+
+	void restrictEqualZero(smtutil::Expression _constraint);
+	void restrictNonzero(smtutil::Expression _constraint);
+
+	YulString localVariableFromExpression(std::string const& _expressionName);
 
 	virtual std::shared_ptr<smtutil::Sort> defaultSort() const;
 	virtual smtutil::Expression booleanValue(smtutil::Expression _value) const;
 	virtual smtutil::Expression constantValue(size_t _value) const;
 	virtual smtutil::Expression literalValue(Literal const& _literal) const;
-	virtual smtutil::Expression unsignedToSigned(smtutil::Expression _value);
-	virtual smtutil::Expression signedToUnsigned(smtutil::Expression _value);
-	virtual smtutil::Expression wrap(smtutil::Expression _value);
 
 	Dialect const& m_dialect;
 	std::set<YulString> const& m_ssaVariables;
 	std::unique_ptr<smtutil::SolverInterface> m_solver;
 	std::map<YulString, smtutil::Expression> m_variables;
+	std::map<YulString, smtutil::Expression> m_nonEncodedValues;
 
 	size_t m_varCounter = 0;
 };
