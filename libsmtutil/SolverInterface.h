@@ -77,7 +77,7 @@ public:
 		if (name == "tuple_constructor")
 		{
 			auto tupleSort = std::dynamic_pointer_cast<TupleSort>(sort);
-			smtAssert(tupleSort, "");
+			smtAssert(tupleSort, "Function \"tuple_constructor\" must have a TupleSort argument.");
 			return arguments.size() == tupleSort->components.size();
 		}
 
@@ -86,7 +86,7 @@ public:
 			{"not", 1},
 			{"and", 2},
 			{"or", 2},
-			{"implies", 2},
+			{"=>", 2},
 			{"=", 2},
 			{"<", 2},
 			{"<=", 2},
@@ -116,7 +116,7 @@ public:
 
 	static Expression ite(Expression _condition, Expression _trueValue, Expression _falseValue)
 	{
-		smtAssert(*_trueValue.sort == *_falseValue.sort, "");
+		smtAssert(*_trueValue.sort == *_falseValue.sort, "True sort must = false sort.");
 		SortPointer sort = _trueValue.sort;
 		return Expression("ite", std::vector<Expression>{
 			std::move(_condition), std::move(_trueValue), std::move(_falseValue)
@@ -126,7 +126,7 @@ public:
 	static Expression implies(Expression _a, Expression _b)
 	{
 		return Expression(
-			"implies",
+			"=>",
 			std::move(_a),
 			std::move(_b),
 			Kind::Bool
@@ -136,11 +136,11 @@ public:
 	/// select is the SMT representation of an array index access.
 	static Expression select(Expression _array, Expression _index)
 	{
-		smtAssert(_array.sort->kind == Kind::Array, "");
+		smtAssert(_array.sort->kind == Kind::Array, "Select must have array argument.");
 		std::shared_ptr<ArraySort> arraySort = std::dynamic_pointer_cast<ArraySort>(_array.sort);
-		smtAssert(arraySort, "");
-		smtAssert(_index.sort, "");
-		smtAssert(*arraySort->domain == *_index.sort, "");
+		smtAssert(arraySort, "Array sort cannot be null.");
+		smtAssert(_index.sort, "Index sort cannot be null.");
+		smtAssert(*arraySort->domain == *_index.sort, "Array's domain must be the same as the index sort.");
 		return Expression(
 			"select",
 			std::vector<Expression>{std::move(_array), std::move(_index)},
@@ -153,11 +153,11 @@ public:
 	static Expression store(Expression _array, Expression _index, Expression _element)
 	{
 		auto arraySort = std::dynamic_pointer_cast<ArraySort>(_array.sort);
-		smtAssert(arraySort, "");
-		smtAssert(_index.sort, "");
-		smtAssert(_element.sort, "");
-		smtAssert(*arraySort->domain == *_index.sort, "");
-		smtAssert(*arraySort->range == *_element.sort, "");
+		smtAssert(arraySort, "Store must have array argument.");
+		smtAssert(_index.sort, "Index sort cannot be null");
+		smtAssert(_element.sort, "Element sort cannot be null.");
+		smtAssert(*arraySort->domain == *_index.sort, "Array's domain must be the same as the index sort.");
+		smtAssert(*arraySort->range == *_element.sort, "Array's range must be the same as the element sort.");
 		return Expression(
 			"store",
 			std::vector<Expression>{std::move(_array), std::move(_index), std::move(_element)},
@@ -167,12 +167,12 @@ public:
 
 	static Expression const_array(Expression _sort, Expression _value)
 	{
-		smtAssert(_sort.sort->kind == Kind::Sort, "");
+		smtAssert(_sort.sort->kind == Kind::Sort, "const_array must have a sort as argument.");
 		auto sortSort = std::dynamic_pointer_cast<SortSort>(_sort.sort);
 		auto arraySort = std::dynamic_pointer_cast<ArraySort>(sortSort->inner);
-		smtAssert(sortSort && arraySort, "");
-		smtAssert(_value.sort, "");
-		smtAssert(*arraySort->range == *_value.sort, "");
+		smtAssert(sortSort && arraySort, "Sort and array sorts cannot be null.");
+		smtAssert(_value.sort, "Value sort cannot be null.");
+		smtAssert(*arraySort->range == *_value.sort, "Array's range must be the same as the value sort.");
 		return Expression(
 			"const_array",
 			std::vector<Expression>{std::move(_sort), std::move(_value)},
@@ -182,10 +182,10 @@ public:
 
 	static Expression tuple_get(Expression _tuple, size_t _index)
 	{
-		smtAssert(_tuple.sort->kind == Kind::Tuple, "");
+		smtAssert(_tuple.sort->kind == Kind::Tuple, "tuple_get must have a tuple as argument.");
 		std::shared_ptr<TupleSort> tupleSort = std::dynamic_pointer_cast<TupleSort>(_tuple.sort);
-		smtAssert(tupleSort, "");
-		smtAssert(_index < tupleSort->components.size(), "");
+		smtAssert(tupleSort, "Tuple sort cannot be null.");
+		smtAssert(_index < tupleSort->components.size(), "tuple_get index cannot be >= number of components.");
 		return Expression(
 			"tuple_get",
 			std::vector<Expression>{std::move(_tuple), Expression(_index)},
@@ -195,11 +195,11 @@ public:
 
 	static Expression tuple_constructor(Expression _tuple, std::vector<Expression> _arguments)
 	{
-		smtAssert(_tuple.sort->kind == Kind::Sort, "");
+		smtAssert(_tuple.sort->kind == Kind::Sort, "tuple_constructor must have a tuple as argument.");
 		auto sortSort = std::dynamic_pointer_cast<SortSort>(_tuple.sort);
 		auto tupleSort = std::dynamic_pointer_cast<TupleSort>(sortSort->inner);
-		smtAssert(tupleSort, "");
-		smtAssert(_arguments.size() == tupleSort->components.size(), "");
+		smtAssert(tupleSort, "Tuple sort cannot be null.");
+		smtAssert(_arguments.size() == tupleSort->components.size(), "tuple_constructor must have the same number of arguments and components.");
 		return Expression(
 			"tuple_constructor",
 			std::move(_arguments),
@@ -209,10 +209,10 @@ public:
 
 	static Expression int2bv(Expression _n, size_t _size)
 	{
-		smtAssert(_n.sort->kind == Kind::Int, "");
+		smtAssert(_n.sort->kind == Kind::Int, "int2bv must have an int as argument.");
 		std::shared_ptr<IntSort> intSort = std::dynamic_pointer_cast<IntSort>(_n.sort);
-		smtAssert(intSort, "");
-		smtAssert(_size <= 256, "");
+		smtAssert(intSort, "Int sort cannot be null.");
+		smtAssert(_size <= 256, "BitVector size cannot be greater than 256.");
 		return Expression(
 			"int2bv",
 			std::vector<Expression>{std::move(_n), Expression(_size)},
@@ -222,10 +222,10 @@ public:
 
 	static Expression bv2int(Expression _bv, bool _signed = false)
 	{
-		smtAssert(_bv.sort->kind == Kind::BitVector, "");
+		smtAssert(_bv.sort->kind == Kind::BitVector, "bv2int must have a BitVector as argument.");
 		std::shared_ptr<BitVectorSort> bvSort = std::dynamic_pointer_cast<BitVectorSort>(_bv.sort);
-		smtAssert(bvSort, "");
-		smtAssert(bvSort->size <= 256, "");
+		smtAssert(bvSort, "BitVector sort cannot be null.");
+		smtAssert(bvSort->size <= 256, "BitVector size cannot be greater than 256.");
 		return Expression(
 			"bv2int",
 			std::vector<Expression>{std::move(_bv)},
@@ -243,7 +243,7 @@ public:
 	{
 		if (_a.sort->kind == Kind::BitVector)
 		{
-			smtAssert(_b.sort->kind == Kind::BitVector, "");
+			smtAssert(_b.sort->kind == Kind::BitVector, "Bitwise && must have 2 BVs.");
 			return _a & _b;
 		}
 		return Expression("and", std::move(_a), std::move(_b), Kind::Bool);
@@ -252,14 +252,14 @@ public:
 	{
 		if (_a.sort->kind == Kind::BitVector)
 		{
-			smtAssert(_b.sort->kind == Kind::BitVector, "");
+			smtAssert(_b.sort->kind == Kind::BitVector, "Bitwise || must have 2 BVs.");
 			return _a | _b;
 		}
 		return Expression("or", std::move(_a), std::move(_b), Kind::Bool);
 	}
 	friend Expression operator==(Expression _a, Expression _b)
 	{
-		smtAssert(_a.sort->kind == _b.sort->kind, "Trying to create an 'equal' expression with different sorts");
+		smtAssert(_a.sort->kind == _b.sort->kind, "Trying to create an 'equal' expression with different sorts.");
 		return Expression("=", std::move(_a), std::move(_b), Kind::Bool);
 	}
 	friend Expression operator!=(Expression _a, Expression _b)

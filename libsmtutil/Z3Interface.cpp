@@ -70,7 +70,7 @@ void Z3Interface::pop()
 
 void Z3Interface::declareVariable(string const& _name, SortPointer const& _sort)
 {
-	smtAssert(_sort, "");
+	smtAssert(_sort, "Declared variable must have a sort.");
 	if (_sort->kind == Kind::Function)
 		declareFunction(_name, *_sort);
 	else if (m_constants.count(_name))
@@ -81,7 +81,7 @@ void Z3Interface::declareVariable(string const& _name, SortPointer const& _sort)
 
 void Z3Interface::declareFunction(string const& _name, Sort const& _sort)
 {
-	smtAssert(_sort.kind == Kind::Function, "");
+	smtAssert(_sort.kind == Kind::Function, "Declared function must have kind \"Function\".");
 	FunctionSort fSort = dynamic_cast<FunctionSort const&>(_sort);
 	if (m_functions.count(_name))
 		m_functions.at(_name) = m_context.function(_name.c_str(), z3Sort(fSort.domain), z3Sort(*fSort.codomain));
@@ -154,7 +154,7 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 			return m_functions.at(n)(arguments);
 		else if (m_constants.count(n))
 		{
-			smtAssert(arguments.empty(), "");
+			smtAssert(arguments.empty(), "Constants cannot have arguments.");
 			return m_constants.at(n);
 		}
 		else if (arguments.empty())
@@ -166,7 +166,7 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 			else if (_expr.sort->kind == Kind::Sort)
 			{
 				auto sortSort = dynamic_pointer_cast<SortSort>(_expr.sort);
-				smtAssert(sortSort, "");
+				smtAssert(sortSort, "Kind sort must imply sort Sort.");
 				return m_context.constant(n.c_str(), z3Sort(*sortSort->inner));
 			}
 			else
@@ -180,7 +180,7 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 				}
 		}
 
-		smtAssert(_expr.hasCorrectArity(), "");
+		smtAssert(_expr.hasCorrectArity(), "Expression does not have correct arity.");
 		if (n == "ite")
 			return z3::ite(arguments[0], arguments[1], arguments[2]);
 		else if (n == "not")
@@ -189,7 +189,7 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 			return arguments[0] && arguments[1];
 		else if (n == "or")
 			return arguments[0] || arguments[1];
-		else if (n == "implies")
+		else if (n == "=>")
 			return z3::implies(arguments[0], arguments[1]);
 		else if (n == "=")
 			return arguments[0] == arguments[1];
@@ -233,7 +233,7 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 		else if (n == "bv2int")
 		{
 			auto intSort = dynamic_pointer_cast<IntSort>(_expr.sort);
-			smtAssert(intSort, "");
+			smtAssert(intSort, "Function \"bv2int\" must have sort Int.");
 			return z3::bv2int(arguments[0], intSort->isSigned);
 		}
 		else if (n == "select")
@@ -243,9 +243,9 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 		else if (n == "const_array")
 		{
 			shared_ptr<SortSort> sortSort = std::dynamic_pointer_cast<SortSort>(_expr.arguments[0].sort);
-			smtAssert(sortSort, "");
+			smtAssert(sortSort, "Function \"const_array\" must have a sort as first argument.");
 			auto arraySort = dynamic_pointer_cast<ArraySort>(sortSort->inner);
-			smtAssert(arraySort && arraySort->domain, "");
+			smtAssert(arraySort && arraySort->domain, "Function \"const_array\" must have an array with domain as argument.");
 			return z3::const_array(z3Sort(*arraySort->domain), arguments[1]);
 		}
 		else if (n == "tuple_get")
@@ -256,21 +256,21 @@ z3::expr Z3Interface::toZ3Expr(Expression const& _expr)
 		else if (n == "tuple_constructor")
 		{
 			auto constructor = z3::func_decl(m_context, Z3_get_tuple_sort_mk_decl(m_context, z3Sort(*_expr.sort)));
-			smtAssert(constructor.arity() == arguments.size(), "");
+			smtAssert(constructor.arity() == arguments.size(), "Function \"tuple_constructor\" must have same amount of arguments as the constructor arity.");
 			z3::expr_vector args(m_context);
 			for (auto const& arg: arguments)
 				args.push_back(arg);
 			return constructor(args);
 		}
 
-		smtAssert(false, "");
+		smtAssert(false, "Unknown SMT function: " + n);
 	}
 	catch (z3::exception const& _e)
 	{
 		smtAssert(false, _e.msg());
 	}
 
-	smtAssert(false, "");
+	smtAssert(false, "Unreachable");
 }
 
 Expression Z3Interface::fromZ3Expr(z3::expr const& _expr)
@@ -279,7 +279,7 @@ Expression Z3Interface::fromZ3Expr(z3::expr const& _expr)
 	if (_expr.is_const() || _expr.is_var())
 		return Expression(_expr.to_string(), {}, sort);
 
-	smtAssert(_expr.is_app(), "");
+	smtAssert(_expr.is_app(), "Expression must be a function application.");
 	vector<Expression> arguments;
 	for (unsigned i = 0; i < _expr.num_args(); ++i)
 		arguments.push_back(fromZ3Expr(_expr.arg(i)));
@@ -324,9 +324,9 @@ Expression Z3Interface::fromZ3Expr(z3::expr const& _expr)
 	else if (kind == Z3_OP_BASHR)
 		return Expression::ashr(arguments[0], arguments[1]);
 	else if (kind == Z3_OP_INT2BV)
-		smtAssert(false, "");
+		smtAssert(false, "Z3_OP_INT2BV is unsupported.");
 	else if (kind == Z3_OP_BV2INT)
-		smtAssert(false, "");
+		smtAssert(false, "Z3_OP_BV2INT is unsupported.");
 	else if (kind == Z3_OP_SELECT)
 		return Expression::select(arguments[0], arguments[1]);
 	else if (kind == Z3_OP_STORE)
@@ -342,11 +342,11 @@ Expression Z3Interface::fromZ3Expr(z3::expr const& _expr)
 		return Expression::tuple_constructor(Expression(sortSort), arguments);
 	}
 	else if (kind == Z3_OP_DT_ACCESSOR)
-		smtAssert(false, "");
+		smtAssert(false, "Z3_OP_DT_ACCESSOR is unsupported.");
 	else if (kind == Z3_OP_UNINTERPRETED)
 		return Expression(_expr.decl().name().str(), arguments, fromZ3Sort(_expr.get_sort()));
 
-	smtAssert(false, "");
+	smtAssert(false, "Unreachable conversion.");
 }
 
 z3::sort Z3Interface::z3Sort(Sort const& _sort)
@@ -389,7 +389,7 @@ z3::sort Z3Interface::z3Sort(Sort const& _sort)
 	default:
 		break;
 	}
-	smtAssert(false, "");
+	smtAssert(false, "Unreachable sort conversion.");
 	// Cannot be reached.
 	return m_context.int_sort();
 }
@@ -426,7 +426,7 @@ SortPointer Z3Interface::fromZ3Sort(z3::sort const& _sort)
 		}
 		return make_shared<TupleSort>(name, memberNames, memberSorts);
 	}
-	smtAssert(false, "");
+	smtAssert(false, "Unreachable from sort conversion.");
 }
 
 vector<SortPointer> Z3Interface::fromZ3Sort(z3::sort_vector const& _sorts)

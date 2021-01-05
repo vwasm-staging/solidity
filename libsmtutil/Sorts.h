@@ -89,7 +89,7 @@ struct FunctionSort: public Sort
 		if (!Sort::operator==(_other))
 			return false;
 		auto _otherFunction = dynamic_cast<FunctionSort const*>(&_other);
-		smtAssert(_otherFunction, "");
+		smtAssert(_otherFunction, "Other function cannot be null.");
 		if (domain.size() != _otherFunction->domain.size())
 			return false;
 		if (!std::equal(
@@ -99,8 +99,8 @@ struct FunctionSort: public Sort
 			[&](SortPointer _a, SortPointer _b) { return *_a == *_b; }
 		))
 			return false;
-		smtAssert(codomain, "");
-		smtAssert(_otherFunction->codomain, "");
+		smtAssert(codomain, "Codomain cannot be null.");
+		smtAssert(_otherFunction->codomain, "Other function's codomain cannot be null.");
 		return *codomain == *_otherFunction->codomain;
 	}
 
@@ -119,11 +119,11 @@ struct ArraySort: public Sort
 		if (!Sort::operator==(_other))
 			return false;
 		auto _otherArray = dynamic_cast<ArraySort const*>(&_other);
-		smtAssert(_otherArray, "");
-		smtAssert(_otherArray->domain, "");
-		smtAssert(_otherArray->range, "");
-		smtAssert(domain, "");
-		smtAssert(range, "");
+		smtAssert(_otherArray, "Other array cannot be null.");
+		smtAssert(_otherArray->domain, "Other array's domain cannot be null.");
+		smtAssert(_otherArray->range, "Other array's range cannot be null.");
+		smtAssert(domain, "Domain cannot be null.");
+		smtAssert(range, "Range cannot be null.");
 		return *domain == *_otherArray->domain && *range == *_otherArray->range;
 	}
 
@@ -139,9 +139,9 @@ struct SortSort: public Sort
 		if (!Sort::operator==(_other))
 			return false;
 		auto _otherSort = dynamic_cast<SortSort const*>(&_other);
-		smtAssert(_otherSort, "");
-		smtAssert(_otherSort->inner, "");
-		smtAssert(inner, "");
+		smtAssert(_otherSort, "Other sort cannot be null.");
+		smtAssert(_otherSort->inner, "Other sort's inner sort cannot be null.");
+		smtAssert(inner, "Inner sort cannot be null.");
 		return *inner == *_otherSort->inner;
 	}
 
@@ -166,7 +166,7 @@ struct TupleSort: public Sort
 		if (!Sort::operator==(_other))
 			return false;
 		auto _otherTuple = dynamic_cast<TupleSort const*>(&_other);
-		smtAssert(_otherTuple, "");
+		smtAssert(_otherTuple, "Other tuple cannot be null.");
 		if (name != _otherTuple->name)
 			return false;
 		if (members != _otherTuple->members)

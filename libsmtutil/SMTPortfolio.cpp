@@ -71,7 +71,7 @@ void SMTPortfolio::pop()
 
 void SMTPortfolio::declareVariable(string const& _name, SortPointer const& _sort)
 {
-	smtAssert(_sort, "");
+	smtAssert(_sort, "Declared variable must have a sort.");
 	for (auto const& s: m_solvers)
 		s->declareVariable(_name, _sort);
 }
@@ -144,8 +144,8 @@ vector<string> SMTPortfolio::unhandledQueries()
 {
 	// This code assumes that the constructor guarantees that
 	// SmtLib2Interface is in position 0.
-	smtAssert(!m_solvers.empty(), "");
-	smtAssert(dynamic_cast<SMTLib2Interface*>(m_solvers.front().get()), "");
+	smtAssert(!m_solvers.empty(), "SMTPortfolio should not be empty.");
+	smtAssert(dynamic_cast<SMTLib2Interface*>(m_solvers.front().get()), "First solver in SMTPortfolio should be SMTLib2Interface.");
 	return m_solvers.front()->unhandledQueries();
 }
 

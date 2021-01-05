@@ -53,7 +53,7 @@ Z3CHCInterface::Z3CHCInterface(optional<unsigned> _queryTimeout):
 
 void Z3CHCInterface::declareVariable(string const& _name, SortPointer const& _sort)
 {
-	smtAssert(_sort, "");
+	smtAssert(_sort, "Declared variable must have a sort.");
 	m_z3Interface->declareVariable(_name, _sort);
 }
 
@@ -190,12 +190,12 @@ CHCSolverInterface::CexGraph Z3CHCInterface::cexGraph(z3::expr const& _proof)
 	while (!proofStack.empty())
 	{
 		z3::expr proofNode = proofStack.top();
-		smtAssert(graph.nodes.count(proofNode.id()), "");
+		smtAssert(graph.nodes.count(proofNode.id()), "Must have node for front of queue.");
 		proofStack.pop();
 
 		if (proofNode.is_app() && proofNode.decl().decl_kind() == Z3_OP_PR_HYPER_RESOLVE)
 		{
-			smtAssert(proofNode.num_args() > 0, "");
+			smtAssert(proofNode.num_args() > 0, "Predicate node must have arguments.");
 			for (unsigned i = 1; i < proofNode.num_args() - 1; ++i)
 			{
 				z3::expr child = proofNode.arg(i);
@@ -221,7 +221,7 @@ CHCSolverInterface::CexGraph Z3CHCInterface::cexGraph(z3::expr const& _proof)
 
 z3::expr Z3CHCInterface::fact(z3::expr const& _node)
 {
-	smtAssert(_node.is_app(), "");
+	smtAssert(_node.is_app(), "Predicate must be a function application.");
 	if (_node.num_args() == 0)
 		return _node;
 	return _node.arg(_node.num_args() - 1);
@@ -229,13 +229,13 @@ z3::expr Z3CHCInterface::fact(z3::expr const& _node)
 
 string Z3CHCInterface::name(z3::expr const& _predicate)
 {
-	smtAssert(_predicate.is_app(), "");
+	smtAssert(_predicate.is_app(), "Predicate must be a function application.");
 	return _predicate.decl().name().str();
 }
 
 vector<string> Z3CHCInterface::arguments(z3::expr const& _predicate)
 {
-	smtAssert(_predicate.is_app(), "");
+	smtAssert(_predicate.is_app(), "Predicate must be a function application.");
 	vector<string> args;
 	for (unsigned i = 0; i < _predicate.num_args(); ++i)
 		args.emplace_back(_predicate.arg(i).to_string());

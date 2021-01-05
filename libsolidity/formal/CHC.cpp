@@ -69,6 +69,7 @@ CHC::CHC(
 #else
 	usesZ3 = false;
 #endif
+	usesZ3 = false;
 	if (!usesZ3)
 		m_interface = make_unique<CHCSmtLib2Interface>(_smtlib2Responses, _smtCallback, m_settings.timeout);
 }
@@ -934,6 +935,7 @@ void CHC::resetSourceAnalysis()
 	bool usesZ3 = false;
 #ifdef HAVE_Z3
 	usesZ3 = m_enabledSolvers.z3 && Z3Interface::available();
+	usesZ3 = false;
 	if (usesZ3)
 	{
 		/// z3::fixedpoint does not have a reset mechanism, so we need to create another.
@@ -946,7 +948,7 @@ void CHC::resetSourceAnalysis()
 	if (!usesZ3)
 	{
 		auto smtlib2Interface = dynamic_cast<CHCSmtLib2Interface*>(m_interface.get());
-		smtlib2Interface->reset();
+		//smtlib2Interface->reset();
 		solAssert(smtlib2Interface, "");
 		m_context.setSolver(smtlib2Interface->smtlib2Interface());
 	}
@@ -1422,11 +1424,12 @@ pair<CheckResult, CHCSolverInterface::CexGraph> CHC::query(smtutil::Expression c
 	CheckResult result;
 	CHCSolverInterface::CexGraph cex;
 	tie(result, cex) = m_interface->query(_query);
+	//cout << "CHC result is " << int(result) << endl;
 	switch (result)
 	{
 	case CheckResult::SATISFIABLE:
 	{
-#ifdef HAVE_Z3
+#ifdef false//HAVE_Z3
 		// Even though the problem is SAT, Spacer's pre processing makes counterexamples incomplete.
 		// We now disable those optimizations and check whether we can still solve the problem.
 		auto* spacer = dynamic_cast<Z3CHCInterface*>(m_interface.get());
@@ -1610,6 +1613,7 @@ void CHC::checkAndReportTarget(
 	connectBlocks(_target.value, error(), _target.constraints);
 	auto const& location = _target.errorNode->location();
 	auto const& [result, model] = query(error(), location);
+	//cout << "Resuuuuuuuuuuult is " << int(result) << endl;
 	if (result == CheckResult::UNSATISFIABLE)
 		m_safeTargets[_target.errorNode].insert(_target.type);
 	else if (result == CheckResult::SATISFIABLE)

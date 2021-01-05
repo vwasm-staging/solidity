@@ -23,6 +23,8 @@
 #include <boost/algorithm/string/join.hpp>
 #include <boost/algorithm/string/predicate.hpp>
 
+#include <range/v3/algorithm/find_if.hpp>
+
 #include <array>
 #include <fstream>
 #include <iostream>
@@ -68,13 +70,13 @@ void SMTLib2Interface::push()
 
 void SMTLib2Interface::pop()
 {
-	smtAssert(!m_accumulatedOutput.empty(), "");
+	smtAssert(!m_accumulatedOutput.empty(), "Trying to pop an empty accumulated output.");
 	m_accumulatedOutput.pop_back();
 }
 
 void SMTLib2Interface::declareVariable(string const& _name, SortPointer const& _sort)
 {
-	smtAssert(_sort, "");
+	smtAssert(_sort, "Declared variable must have a sort.");
 	if (_sort->kind == Kind::Function)
 		declareFunction(_name, _sort);
 	else if (!m_variables.count(_name))
@@ -86,8 +88,8 @@ void SMTLib2Interface::declareVariable(string const& _name, SortPointer const& _
 
 void SMTLib2Interface::declareFunction(string const& _name, SortPointer const& _sort)
 {
-	smtAssert(_sort, "");
-	smtAssert(_sort->kind == Kind::Function, "");
+	smtAssert(_sort, "Declared function must have a sort.");
+	smtAssert(_sort->kind == Kind::Function, "Declared function must have kind \"Function\".");
 	// TODO Use domain and codomain as key as well
 	if (!m_variables.count(_name))
 	{
@@ -156,7 +158,7 @@ string SMTLib2Interface::toSExpr(Expression const& _expr)
 	else if (_expr.name == "bv2int")
 	{
 		auto intSort = dynamic_pointer_cast<IntSort>(_expr.sort);
-		smtAssert(intSort, "");
+		smtAssert(intSort, "Function \"bv2int\" must have sort Int.");
 
 		auto arg = toSExpr(_expr.arguments.front());
 		auto nat = "(bv2nat " + arg + ")";
@@ -165,7 +167,7 @@ string SMTLib2Interface::toSExpr(Expression const& _expr)
 			return nat;
 
 		auto bvSort = dynamic_pointer_cast<BitVectorSort>(_expr.arguments.front().sort);
-		smtAssert(bvSort, "");
+		smtAssert(bvSort, "Function \"bv2int\" expects argument of sort BitVector.");
 		auto size = to_string(bvSort->size);
 		auto pos = to_string(bvSort->size - 1);
 
@@ -177,26 +179,26 @@ string SMTLib2Interface::toSExpr(Expression const& _expr)
 	}
 	else if (_expr.name == "const_array")
 	{
-		smtAssert(_expr.arguments.size() == 2, "");
+		smtAssert(_expr.arguments.size() == 2, "Function \"const_array\" expects 2 arguments.");
 		auto sortSort = std::dynamic_pointer_cast<SortSort>(_expr.arguments.at(0).sort);
-		smtAssert(sortSort, "");
+		smtAssert(sortSort, "Function \"const_array\" expects its first argument to have sort Sort.");
 		auto arraySort = dynamic_pointer_cast<ArraySort>(sortSort->inner);
-		smtAssert(arraySort, "");
+		smtAssert(arraySort, "Function \"const_array\" expects its first argument to have inner sort Array.");
 		sexpr += "(as const " + toSmtLibSort(*arraySort) + ") ";
 		sexpr += toSExpr(_expr.arguments.at(1));
 	}
 	else if (_expr.name == "tuple_get")
 	{
-		smtAssert(_expr.arguments.size() == 2, "");
+		smtAssert(_expr.arguments.size() == 2, "Function \"tuple_get\" expects 2 arguments.");
 		auto tupleSort = dynamic_pointer_cast<TupleSort>(_expr.arguments.at(0).sort);
 		size_t index = std::stoul(_expr.arguments.at(1).name);
-		smtAssert(index < tupleSort->members.size(), "");
+		smtAssert(index < tupleSort->members.size(), "Function \"tuple_get\" has index greater or equal number of members.");
 		sexpr += "|" + tupleSort->members.at(index) + "| " + toSExpr(_expr.arguments.at(0));
 	}
 	else if (_expr.name == "tuple_constructor")
 	{
 		auto tupleSort = dynamic_pointer_cast<TupleSort>(_expr.sort);
-		smtAssert(tupleSort, "");
+		smtAssert(tupleSort, "Function \"tuple_constructor\" must have a sort.");
 		sexpr += "|" + tupleSort->name + "|";
 		for (auto const& arg: _expr.arguments)
 			sexpr += " " + toSExpr(arg);
@@ -224,21 +226,24 @@ string SMTLib2Interface::toSmtLibSort(Sort const& _sort)
 	case Kind::Array:
 	{
 		auto const& arraySort = dynamic_cast<ArraySort const&>(_sort);
-		smtAssert(arraySort.domain && arraySort.range, "");
+		smtAssert(arraySort.domain && arraySort.range, "Sort Array must have a domain and range.");
 		return "(Array " + toSmtLibSort(*arraySort.domain) + ' ' + toSmtLibSort(*arraySort.range) + ')';
 	}
 	case Kind::Tuple:
 	{
 		auto const& tupleSort = dynamic_cast<TupleSort const&>(_sort);
 		string tupleName = "|" + tupleSort.name + "|";
-		if (!m_userSorts.count(tupleName))
+		//if (!m_userSorts.count(tupleName))
+		auto isName = [&](auto entry) { return entry.first == tupleName; };
+		if (ranges::find_if(m_userSorts, isName) == m_userSorts.end())
 		{
-			m_userSorts.insert(tupleName);
 			string decl("(declare-datatypes ((" + tupleName + " 0)) (((" + tupleName);
-			smtAssert(tupleSort.members.size() == tupleSort.components.size(), "");
+			smtAssert(tupleSort.members.size() == tupleSort.components.size(), "Sort tuple must have same number of members and components.");
 			for (unsigned i = 0; i < tupleSort.members.size(); ++i)
 				decl += " (|" + tupleSort.members.at(i) + "| " + toSmtLibSort(*tupleSort.components.at(i)) + ")";
 			decl += "))))";
+			//m_userSorts.emplace(tupleName, decl);
+			m_userSorts.emplace_back(tupleName, decl);
 			write(decl);
 		}
 
@@ -260,7 +265,7 @@ string SMTLib2Interface::toSmtLibSort(vector<SortPointer> const& _sorts)
 
 void SMTLib2Interface::write(string _data)
 {
-	smtAssert(!m_accumulatedOutput.empty(), "");
+	smtAssert(!m_accumulatedOutput.empty(), "Trying to write to empty accumulated output.");
 	m_accumulatedOutput.back() += move(_data) + "\n";
 }
 

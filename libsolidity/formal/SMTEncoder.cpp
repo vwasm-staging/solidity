@@ -1893,8 +1893,8 @@ pair<smtutil::Expression, smtutil::Expression> SMTEncoder::divModWithSlacks(
 	else // unsigned version
 		m_context.addAssertion(0 <= r && (_right == 0 || r < _right));
 
-	auto divResult = smtutil::Expression::ite(_right == 0, 0, d);
-	auto modResult = smtutil::Expression::ite(_right == 0, 0, r);
+	auto divResult = _left / _right;//smtutil::Expression::ite(_right == 0, 0, d);
+	auto modResult = _left % _right;//smtutil::Expression::ite(_right == 0, 0, r);
 	return {divResult, modResult};
 }
 
