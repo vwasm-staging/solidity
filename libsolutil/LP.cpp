@@ -452,18 +452,23 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(0));
 		addAssertion(_expr.arguments.at(1));
 	}
-	else if (_expr.name == "<=")
+	else if (_expr.name == "<=" || _expr.name == "=")
 	{
 		// TODO If it is a direct upper or lower bound on a single variable,
 		// add those to a special set, so we can directly test any contracdictians
 		// and olso simplify.
+		// TODO if a variable ends up being fixed (upper bound equal lower bound),
+		// we can remove it and replace all its references.
+		// this can only be done at checking time, though, as other
+		// added constraints might make the system infeasible.
+		// We can also leave it in and just replace everything.
 		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
 		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
 		if (left && right)
 		{
 			vector<rational> data = *left - *right;
 			data[0] *= -1;
-			m_state.top().constraints.emplace_back(Constraint{move(data), false});
+			m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
 		}
 	}
 	else if (_expr.name == ">=")
@@ -472,16 +477,6 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(0) <= _expr.arguments.at(1) - 1);
 	else if (_expr.name == ">")
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
-	else if (_expr.name == "=")
-	{
-		// TODO if a variable ends up being fixed (upper bound equal lower bound),
-		// we can remove it and replace all its references.
-		// this can only be done at checking time, though, as other
-		// added constraints might make the system infeasible.
-		// We can also leave it in and just replace everything.
-		addAssertion(_expr.arguments.at(0) <= _expr.arguments.at(1));
-		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
-	}
 }
 
 pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
