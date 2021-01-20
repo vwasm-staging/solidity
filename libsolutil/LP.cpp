@@ -29,6 +29,7 @@
 #include <range/v3/view/iota.hpp>
 #include <range/v3/algorithm/all_of.hpp>
 #include <range/v3/algorithm/max.hpp>
+#include <range/v3/algorithm/count_if.hpp>
 
 using namespace std;
 using namespace solidity;
@@ -133,20 +134,26 @@ struct Tableau
 };
 
 
-/// Add slack variables to turn the tableau into equational form.
-Tableau toEquationalForm(Tableau _tableau)
+pair<vector<Constraint>, bool> toEquationalForm(vector<Constraint> _constraints)
 {
-	size_t rows = _tableau.data.size();
-	size_t columns = _tableau.data.at(0).size();
-	for (size_t i = 0; i < rows; ++i)
+	size_t varsNeeded = static_cast<size_t>(ranges::count_if(_constraints, [](Constraint const& _c) { return !_c.equality; }));
+
+	vector<Constraint> result;
+
+	size_t columns = _constraints.at(0).data.size();
+	size_t currentVariable = 0;
+	for (Constraint& constraint: _constraints)
 	{
-		solAssert(_tableau.data[i].size() == columns, "");
-		_tableau.data[i] += vector<bigint>(rows - 1, bigint{});
-		if (i != 0)
-			_tableau.data[i][columns + i - 1] = 1;
+		solAssert(constraint.data.size() == columns, "");
+		result.emplace_back(Constraint{move(constraint.data) + vector<rational>(varsNeeded, bigint{}), true});
+		if (!constraint.equality)
+		{
+			result.back().data[columns + currentVariable] = bigint(1);
+			currentVariable++;
+		}
 	}
 
-	return _tableau;
+	return make_pair(move(result), varsNeeded > 0);
 }
 
 optional<size_t> findPivotColumn(Tableau const& _tableau)
@@ -198,7 +205,6 @@ Tableau performPivot(Tableau _tableau, size_t _pivotRow, size_t _pivotColumn)
 	return _tableau;
 }
 
-/*
 void printVector(vector<rational> const& _v)
 {
 	for (auto const& element: _v)
@@ -218,7 +224,6 @@ void printTableau(Tableau _tableau)
 	cout << "Solution: ";
 	printVector(optimalVector(_tableau));
 }
-*/
 
 Tableau selectLastVectorsAsBasis(Tableau _tableau)
 {
@@ -371,6 +376,7 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 
 bool needsPhaseI(Tableau const& _tableau)
 {
+	// TODO with equality constraints, this may need refinement.
 	for (size_t i = 1; i < _tableau.data.size(); ++i)
 		if (_tableau.data[i][0] < 0)
 			return true;
@@ -380,26 +386,31 @@ bool needsPhaseI(Tableau const& _tableau)
 /// Solve the LP Ax <= b s.t. min c^Tx
 /// The first row encodes the objective function
 /// The first column encodes b
-pair<LPResult, vector<rational>> simplex(Tableau _tableau)
+pair<LPResult, vector<rational>> simplex(vector<Constraint> _constraints, vector<rational> _objectives)
 {
-	//printTableau(_tableau);
-	_tableau = toEquationalForm(move(_tableau));
-	//cout << "Equational: " << endl;
-	//printTableau(_tableau);
-	if (needsPhaseI(_tableau))
+	Tableau tableau;
+	tableau.data.emplace_back(move(_objectives));
+	bool hasEquations = false;
+	tie(_constraints, hasEquations) = toEquationalForm(_constraints);
+	for (Constraint& c: _constraints)
+		tableau.data.emplace_back(move(c.data));
+	tableau.data.front().resize(tableau.data.at(1).size());
+	cout << "Equational: " << endl;
+	printTableau(tableau);
+	if (hasEquations || needsPhaseI(tableau))
 	{
 		LPResult result;
-		tie(result, _tableau) = simplexPhaseI(move(_tableau));
+		tie(result, tableau) = simplexPhaseI(move(tableau));
 		if (result == LPResult::Infeasible || result == LPResult::Unknown)
 			return make_pair(result, vector<rational>{});
 		solAssert(result == LPResult::Feasible, "");
 	}
 	LPResult result;
 	vector<rational> optimum;
-	tie(result, _tableau) = simplexEq(move(_tableau));
+	tie(result, tableau) = simplexEq(move(tableau));
 	if (result == LPResult::Feasible || result == LPResult::Unbounded)
 	{
-		optimum = optimalVector(_tableau);
+		optimum = optimalVector(tableau);
 		//cout << "Solution: " << endl;
 		//printVector(optimum);
 	}
@@ -443,13 +454,16 @@ void LPSolver::addAssertion(Expression const& _expr)
 	}
 	else if (_expr.name == "<=")
 	{
+		// TODO If it is a direct upper or lower bound on a single variable,
+		// add those to a special set, so we can directly test any contracdictians
+		// and olso simplify.
 		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
 		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
 		if (left && right)
 		{
-			vector<rational> constraint = *left - *right;
-			constraint[0] *= -1;
-			m_state.top().constraints.emplace_back(move(constraint));
+			vector<rational> data = *left - *right;
+			data[0] *= -1;
+			m_state.top().constraints.emplace_back(Constraint{move(data), false});
 		}
 	}
 	else if (_expr.name == ">=")
@@ -460,6 +474,11 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 	else if (_expr.name == "=")
 	{
+		// TODO if a variable ends up being fixed (upper bound equal lower bound),
+		// we can remove it and replace all its references.
+		// this can only be done at checking time, though, as other
+		// added constraints might make the system infeasible.
+		// We can also leave it in and just replace everything.
 		addAssertion(_expr.arguments.at(0) <= _expr.arguments.at(1));
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
 	}
@@ -467,19 +486,18 @@ void LPSolver::addAssertion(Expression const& _expr)
 
 pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
 {
-	vector<vector<rational>> constraints = m_state.top().constraints;
+	vector<Constraint> constraints = m_state.top().constraints;
 	size_t numColumns = 0;
 	for (auto const& row: constraints)
-		numColumns = max(numColumns, row.size());
+		numColumns = max(numColumns, row.data.size());
 	for (auto& row: constraints)
-		row.resize(numColumns);
+		row.data.resize(numColumns);
 
 	cout << "Solving LP:" << endl;
-	/*
-	for (vector<rational> const& row: constraints)
+	for (Constraint const& constraint: constraints)
 	{
 		vector<string> line;
-		for (auto&& [index, multiplier]: row | ranges::views::enumerate)
+		for (auto&& [index, multiplier]: constraint.data | ranges::views::enumerate)
 			if (index > 0 && multiplier != 0)
 			{
 				string mult =
@@ -490,19 +508,16 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 					toString(multiplier) + " ";
 				line.emplace_back(mult + variableName(index));
 			}
-		cout << joinHumanReadable(line, " + ") << " <= "  << toString(row.front()) << endl;
-	}*/
+		cout << joinHumanReadable(line, " + ") << (constraint.equality ? "  =" : " <= ") << toString(constraint.data.front()) << endl;
+	}
 	cout << "----------------------------------------" << endl;
 
-	bool solveInteger = true;
+	bool solveInteger = false;
 
-	Tableau tableau;
-	tableau.data.push_back(vector<rational>(1, rational(bigint(0))) + vector<rational>(numColumns - 1, rational(bigint(1))));
-	tableau.data += move(constraints);
 	CheckResult smtResult;
 	LPResult lpResult;
 	vector<rational> solution;
-	tie(lpResult, solution) = simplex(tableau);
+	tie(lpResult, solution) = simplex(constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(numColumns - 1, rational(bigint(1))));
 	switch (lpResult)
 	{
 	case LPResult::Feasible:

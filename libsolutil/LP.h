@@ -30,6 +30,23 @@
 namespace solidity::util
 {
 
+struct Constraint
+{
+	std::vector<boost::rational<bigint>> data;
+	bool equality = false;
+};
+
+struct State
+{
+	std::map<std::string, size_t> variables;
+	std::vector<Constraint> constraints;
+	/// x >= lowerBounds[x]
+	std::map<size_t, boost::rational<bigint>> lowerBounds;
+	/// x <= upperBounds[x]
+	std::map<size_t, boost::rational<bigint>> upperBounds;
+};
+
+
 class LPSolver: public smtutil::SolverInterface
 {
 public:
@@ -57,12 +74,6 @@ private:
 	std::optional<std::vector<rational>> parseFactor(smtutil::Expression const& _expression) const;
 
 	std::string variableName(size_t _index) const;
-
-	struct State
-	{
-		std::map<std::string, size_t> variables;
-		std::vector<std::vector<rational>> constraints;
-	};
 
 	std::stack<State> m_state{{State{}}};
 };
