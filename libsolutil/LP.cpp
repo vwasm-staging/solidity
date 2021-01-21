@@ -30,6 +30,7 @@
 #include <range/v3/algorithm/all_of.hpp>
 #include <range/v3/algorithm/max.hpp>
 #include <range/v3/algorithm/count_if.hpp>
+#include <range/v3/iterator/operations.hpp>
 
 using namespace std;
 using namespace solidity;
@@ -454,9 +455,6 @@ void LPSolver::addAssertion(Expression const& _expr)
 	}
 	else if (_expr.name == "<=" || _expr.name == "=")
 	{
-		// TODO If it is a direct upper or lower bound on a single variable,
-		// add those to a special set, so we can directly test any contracdictians
-		// and olso simplify.
 		// TODO if a variable ends up being fixed (upper bound equal lower bound),
 		// we can remove it and replace all its references.
 		// this can only be done at checking time, though, as other
@@ -464,12 +462,26 @@ void LPSolver::addAssertion(Expression const& _expr)
 		// We can also leave it in and just replace everything.
 		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
 		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
-		if (left && right)
+		if (!left || !right)
+			return;
+
+		vector<rational> data = *left - *right;
+		data[0] *= -1;
+		auto nonzero = data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
+			[](std::pair<size_t, rational> const& _x) { return _x.second != 0; }
+		);
+		if (ranges::distance(nonzero) == 1)
 		{
-			vector<rational> data = *left - *right;
-			data[0] *= -1;
-			m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
+			auto&& [index, factor] = nonzero.front();
+			// a * x <= b
+			rational bound = data[0] / factor;
+			if (factor >= 0 || _expr.name == "=")
+				addUpperBound(index, bound);
+			if (factor <= 0 || _expr.name == "=")
+				addLowerBound(index, bound);
 		}
+		else
+			m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
 	}
 	else if (_expr.name == ">=")
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
@@ -482,6 +494,35 @@ void LPSolver::addAssertion(Expression const& _expr)
 pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
 {
 	vector<Constraint> constraints = m_state.top().constraints;
+
+	for (auto const& [index, bounds]: m_state.top().bounds)
+	{
+		if (bounds[0] && bounds[1])
+		{
+			if (*bounds[0] > *bounds[1])
+				return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+			vector<rational> c = factorForVariable(index, rational(bigint(1)));
+			c[0] = *bounds[0];
+			constraints.emplace_back(Constraint{move(c), true});
+		}
+		else if (bounds[0])
+		{
+			vector<rational> c = factorForVariable(index, rational(bigint(-1)));
+			c[0] = -*bounds[0];
+			constraints.emplace_back(Constraint{move(c), false});
+		}
+		else if (bounds[1])
+		{
+			vector<rational> c = factorForVariable(index, rational(bigint(1)));
+			c[0] = *bounds[1];
+			constraints.emplace_back(Constraint{move(c), false});
+		}
+	}
+
+	// TODO
+	// remove variables isolated from the rest of the system.
+	// remove variables with a fixed value
+
 	size_t numColumns = 0;
 	for (auto const& row: constraints)
 		numColumns = max(numColumns, row.data.size());
@@ -592,10 +633,30 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 
 	size_t index = m_state.top().variables.at(_expr.name);
 	solAssert(index > 0, "");
-	vector<rational> result(index + 1);
-	result[index] = rational(bigint(1));
+	return factorForVariable(index, rational(bigint(1)));
+}
+
+vector<rational> LPSolver::factorForVariable(size_t _index, rational _factor) const
+{
+	vector<rational> result(_index + 1);
+	result[_index] = move(_factor);
 	return result;
 }
+
+void LPSolver::addUpperBound(size_t _index, rational _value)
+{
+	cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
+	if (!m_state.top().bounds[_index][1] || _value < *m_state.top().bounds[_index][1])
+		m_state.top().bounds[_index][1] = move(_value);
+}
+
+void LPSolver::addLowerBound(size_t _index, rational _value)
+{
+	cout << "adding " << variableName(_index) << " >= " << toString(_value) << endl;
+	if (!m_state.top().bounds[_index][0] || _value > *m_state.top().bounds[_index][0])
+		m_state.top().bounds[_index][0] = move(_value);
+}
+
 
 string LPSolver::variableName(size_t _index) const
 {

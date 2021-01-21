@@ -40,10 +40,7 @@ struct State
 {
 	std::map<std::string, size_t> variables;
 	std::vector<Constraint> constraints;
-	/// x >= lowerBounds[x]
-	std::map<size_t, boost::rational<bigint>> lowerBounds;
-	/// x <= upperBounds[x]
-	std::map<size_t, boost::rational<bigint>> upperBounds;
+	std::map<size_t, std::optional<boost::rational<bigint>>[2]> bounds;
 };
 
 
@@ -72,6 +69,11 @@ private:
 	std::optional<std::vector<rational>> parseLinearSum(smtutil::Expression const& _expression) const;
 	std::optional<std::vector<rational>> parseProduct(smtutil::Expression const& _expression) const;
 	std::optional<std::vector<rational>> parseFactor(smtutil::Expression const& _expression) const;
+
+	std::vector<rational> factorForVariable(size_t _index, rational _factor) const;
+
+	void addUpperBound(size_t _index, rational _value);
+	void addLowerBound(size_t _index, rational _value);
 
 	std::string variableName(size_t _index) const;
 
