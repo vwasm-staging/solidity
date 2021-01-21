@@ -111,6 +111,14 @@ vector<rational> operator-(vector<rational> const& _x, vector<rational> const& _
 	return result;
 }
 
+vector<rational>& operator-=(vector<rational>& _x, vector<rational> const& _y)
+{
+	solAssert(_x.size() == _y.size(), "");
+	for (size_t i = 0; i < _x.size(); ++i)
+		_x[i] -= _y[i];
+	return _x;
+}
+
 vector<rational> add(vector<rational> const& _x, vector<rational> const& _y)
 {
 	vector<rational> result;
@@ -211,7 +219,7 @@ optional<size_t> findPivotRow(Tableau const& _tableau, size_t _pivotColumn)
 	).first;
 }
 
-Tableau performPivot(Tableau _tableau, size_t _pivotRow, size_t _pivotColumn)
+void performPivot(Tableau& _tableau, size_t _pivotRow, size_t _pivotColumn)
 {
 	rational pivot = _tableau.data[_pivotRow][_pivotColumn];
 	solAssert(pivot != 0, "");
@@ -219,9 +227,8 @@ Tableau performPivot(Tableau _tableau, size_t _pivotRow, size_t _pivotColumn)
 	solAssert(_tableau.data[_pivotRow][_pivotColumn] == rational(1), "");
 
 	for (size_t i = 0; i < _tableau.data.size(); ++i)
-		if (i != _pivotRow)
-			_tableau.data[i] = _tableau.data[i] - _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
-	return _tableau;
+		if (i != _pivotRow && _tableau.data[i][_pivotColumn] != rational{})
+			_tableau.data[i] -= _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
 }
 /*
 void printVector(vector<rational> const& _v)
@@ -281,16 +288,14 @@ string toString(SolvingState const& _state)
 }
 */
 
-Tableau selectLastVectorsAsBasis(Tableau _tableau)
+void selectLastVectorsAsBasis(Tableau& _tableau)
 {
 	// We might skip the operation for a column if it is already the correct
 	// unit vector and its cost coefficient is zero.
 	size_t columns = _tableau.data.at(0).size();
 	size_t rows = _tableau.data.size();
 	for (size_t i = 1; i < rows; ++i)
-		_tableau = performPivot(move(_tableau), i, columns - rows + i);
-
-	return _tableau;
+		performPivot(_tableau, i, columns - rows + i);
 }
 
 /// Returns the row containing 1 if all other rows are zero.
@@ -352,9 +357,9 @@ pair<LPResult, Tableau> simplexEq(Tableau _tableau)
 			//vector<rational> optimum = optimalVector(_tableau);
 			//printVector(optimum);
 
-			//cout << "Feasible after " << step << " steps." << endl;
-			//cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
-			//cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
+			cout << "Feasible after " << step << " steps." << endl;
+			cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
+			cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
 			return make_pair(LPResult::Feasible, move(_tableau));
 		}
 		////cout << "Pivot column: " << *pivotColumn << endl;
@@ -365,11 +370,11 @@ pair<LPResult, Tableau> simplexEq(Tableau _tableau)
 			return make_pair(LPResult::Unbounded, move(_tableau));
 		}
 		////cout << "Pivot row: " << *pivotRow << endl;
-		_tableau = performPivot(move(_tableau), *pivotRow, *pivotColumn);
+		performPivot(_tableau, *pivotRow, *pivotColumn);
 		////cout << "After step " << step << endl;
 		//printTableau(_tableau);
 	}
-	//cout << "LP: Too many iterations: " << iterations << endl;
+	cout << "LP: Too many iterations: " << iterations << endl;
 	return make_pair(LPResult::Unknown, Tableau{});
 }
 
@@ -393,7 +398,7 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 	////cout << "Phase I tableau: " << endl;
 	//printTableau(_tableau);
 
-	_tableau = selectLastVectorsAsBasis(move(_tableau));
+	selectLastVectorsAsBasis(_tableau);
 
 	////cout << "After basis selection: " << endl;
 	//printTableau(_tableau);
@@ -461,6 +466,7 @@ pair<LPResult, vector<rational>> simplex(vector<Constraint> _constraints, vector
 			return make_pair(result, vector<rational>{});
 		solAssert(result == LPResult::Feasible, "");
 	}
+	return make_pair(LPResult::Unknown, vector<rational>{});
 	LPResult result;
 	vector<rational> optimum;
 	tie(result, tableau) = simplexEq(move(tableau));
