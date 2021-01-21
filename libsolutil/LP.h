@@ -36,11 +36,18 @@ struct Constraint
 	bool equality = false;
 };
 
+struct SolvingState
+{
+	std::vector<std::string> variableNames;
+	std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> bounds;
+	std::vector<Constraint> constraints;
+};
+
 struct State
 {
 	std::map<std::string, size_t> variables;
 	std::vector<Constraint> constraints;
-	std::map<size_t, std::optional<boost::rational<bigint>>[2]> bounds;
+	std::map<size_t, std::array<std::optional<boost::rational<bigint>>, 2>> bounds;
 };
 
 
@@ -69,8 +76,6 @@ private:
 	std::optional<std::vector<rational>> parseLinearSum(smtutil::Expression const& _expression) const;
 	std::optional<std::vector<rational>> parseProduct(smtutil::Expression const& _expression) const;
 	std::optional<std::vector<rational>> parseFactor(smtutil::Expression const& _expression) const;
-
-	std::vector<rational> factorForVariable(size_t _index, rational _factor) const;
 
 	void addUpperBound(size_t _index, rational _value);
 	void addLowerBound(size_t _index, rational _value);

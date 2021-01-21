@@ -86,7 +86,7 @@ BOOST_AUTO_TEST_CASE(two_vars)
 	solver.addAssertion(y <= 3);
 	solver.addAssertion(x <= 10);
 	solver.addAssertion(4 >= x + y);
-	feasible({{x, "4"}, {y, "0"}});
+	feasible({{x, "1"}, {y, "3"}});
 }
 
 BOOST_AUTO_TEST_CASE(lower_bound)
