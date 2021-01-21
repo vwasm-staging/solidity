@@ -178,10 +178,13 @@ void ReasoningBasedSimplifier::handleDeclaration(
 
 	optional<smtutil::Expression> x;
 	optional<smtutil::Expression> y;
+	optional<smtutil::Expression> z;
 	if (arguments.size() > 0)
 		x = arguments.at(0);
 	if (arguments.size() > 1)
 		y = arguments.at(1);
+	if (arguments.size() > 2)
+		z = arguments.at(2);
 
 	switch (_instruction)
 	{
@@ -196,6 +199,9 @@ void ReasoningBasedSimplifier::handleDeclaration(
 	//case evmasm::Instruction::MUL:
 		// TODO encode constants?
 	//case evmasm::Instruction::DIV:
+	case evmasm::Instruction::ADDMOD:
+		m_solver->addAssertion(variable < *z);
+		break;
 	case evmasm::Instruction::LT:
 		tryAddBoolean(_varName, *x < *y, {*x >= *y});
 		break;

@@ -32,6 +32,8 @@
 #include <range/v3/algorithm/count_if.hpp>
 #include <range/v3/iterator/operations.hpp>
 
+#include <boost/range/algorithm_ext/erase.hpp>
+
 using namespace std;
 using namespace solidity;
 using namespace solidity::util;
@@ -221,7 +223,7 @@ Tableau performPivot(Tableau _tableau, size_t _pivotRow, size_t _pivotColumn)
 			_tableau.data[i] = _tableau.data[i] - _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
 	return _tableau;
 }
-
+/*
 void printVector(vector<rational> const& _v)
 {
 	for (auto const& element: _v)
@@ -241,6 +243,7 @@ void printTableau(Tableau _tableau)
 	cout << "Solution: ";
 	printVector(optimalVector(_tableau));
 }
+
 
 string toString(SolvingState const& _state)
 {
@@ -276,6 +279,7 @@ string toString(SolvingState const& _state)
 	}
 	return result;
 }
+*/
 
 Tableau selectLastVectorsAsBasis(Tableau _tableau)
 {
@@ -344,28 +348,28 @@ pair<LPResult, Tableau> simplexEq(Tableau _tableau)
 		optional<size_t> pivotColumn = findPivotColumn(_tableau);
 		if (!pivotColumn)
 		{
-			//cout << "Optimum: ";
+			////cout << "Optimum: ";
 			//vector<rational> optimum = optimalVector(_tableau);
 			//printVector(optimum);
 
-			cout << "Feasible after " << step << " steps." << endl;
-			cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
-			cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
+			//cout << "Feasible after " << step << " steps." << endl;
+			//cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
+			//cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
 			return make_pair(LPResult::Feasible, move(_tableau));
 		}
-		//cout << "Pivot column: " << *pivotColumn << endl;
+		////cout << "Pivot column: " << *pivotColumn << endl;
 		optional<size_t> pivotRow = findPivotRow(_tableau, *pivotColumn);
 		if (!pivotRow)
 		{
-			//cout << "unbounded" << endl;
+			////cout << "unbounded" << endl;
 			return make_pair(LPResult::Unbounded, move(_tableau));
 		}
-		//cout << "Pivot row: " << *pivotRow << endl;
+		////cout << "Pivot row: " << *pivotRow << endl;
 		_tableau = performPivot(move(_tableau), *pivotRow, *pivotColumn);
-		//cout << "After step " << step << endl;
+		////cout << "After step " << step << endl;
 		//printTableau(_tableau);
 	}
-	cout << "LP: Too many iterations: " << iterations << endl;
+	//cout << "LP: Too many iterations: " << iterations << endl;
 	return make_pair(LPResult::Unknown, Tableau{});
 }
 
@@ -386,12 +390,12 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 		vector<rational>(columns, rational{}) +
 		vector<rational>(rows - 1, rational{-1});
 
-	//cout << "Phase I tableau: " << endl;
+	////cout << "Phase I tableau: " << endl;
 	//printTableau(_tableau);
 
 	_tableau = selectLastVectorsAsBasis(move(_tableau));
 
-	//cout << "After basis selection: " << endl;
+	////cout << "After basis selection: " << endl;
 	//printTableau(_tableau);
 
 	LPResult result;
@@ -400,11 +404,11 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 	// TODO This should actually not happen.
 	if (result != LPResult::Feasible && result != LPResult::Unbounded)
 	{
-		cout << "Unknown because phaseI resulted in " << static_cast<int>(result) << endl;
+		//cout << "Unknown because phaseI resulted in " << static_cast<int>(result) << endl;
 		return make_pair(LPResult::Unknown, Tableau{});
 	}
 	vector<rational> optimum = optimalVector(_tableau);
-	//cout << "PhaseI solution: ";
+	////cout << "PhaseI solution: ";
 	//printVector(optimum);
 
 	for (size_t i = columns - 1; i < optimum.size(); ++i)
@@ -415,12 +419,12 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 	for (size_t i = 1; i < rows; ++i)
 		_tableau.data[i].resize(columns);
 
-	//cout << "Tableau after Phase I: " << endl;
+	////cout << "Tableau after Phase I: " << endl;
 	//printTableau(_tableau);
 
 	// TODO do we need to select a basis?
 	//_tableau = selectLastVectorsAsBasis(move(_tableau));
-	//cout << "After basis correction: " << endl;
+	////cout << "After basis correction: " << endl;
 	//printTableau(_tableau);
 
 	return make_pair(LPResult::Feasible, move(_tableau));
@@ -447,8 +451,8 @@ pair<LPResult, vector<rational>> simplex(vector<Constraint> _constraints, vector
 	for (Constraint& c: _constraints)
 		tableau.data.emplace_back(move(c.data));
 	tableau.data.front().resize(tableau.data.at(1).size());
-	cout << "Equational: " << endl;
-	printTableau(tableau);
+	//cout << "Equational: " << endl;
+	//printTableau(tableau);
 	if (hasEquations || needsPhaseI(tableau))
 	{
 		LPResult result;
@@ -463,7 +467,7 @@ pair<LPResult, vector<rational>> simplex(vector<Constraint> _constraints, vector
 	if (result == LPResult::Feasible || result == LPResult::Unbounded)
 	{
 		optimum = optimalVector(tableau);
-		//cout << "Solution: " << endl;
+		////cout << "Solution: " << endl;
 		//printVector(optimum);
 	}
 	return make_pair(result, move(optimum));
@@ -489,7 +493,7 @@ bool boundsToConstraints(SolvingState& _state)
 				continue;
 			}
 		}
-		if (bounds[0])
+		if (bounds[0] && *bounds[0] > 0)
 		{
 			vector<rational> c(columns);
 			c[0] = -*bounds[0];
@@ -508,26 +512,128 @@ bool boundsToConstraints(SolvingState& _state)
 	return true;
 }
 
+template <class T>
+void eraseIndices(vector<T>& _data, set<size_t>& _indices)
+{
+	// TODO make this more efficient.
+	vector<T> result;
+	for (size_t i = 0; i < _data.size(); i++)
+		if (!_indices.count(i))
+			result.emplace_back(move(_data[i]));
+	_data = move(result);
+}
+
+bool extractDirectConstraints(SolvingState& _state, bool& _changed)
+{
+	// Turn constraints of the form ax <= b into an upper bound on x.
+	set<size_t> constraintsToRemove;
+	for (auto const& [index, constraint]: _state.constraints | ranges::views::enumerate)
+	{
+		auto nonzero = constraint.data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
+			[](std::pair<size_t, rational> const& _x) { return _x.second != 0; }
+		);
+		// TODO we can exit early on in the loop above.
+		if (ranges::distance(nonzero) > 1)
+			continue;
+		constraintsToRemove.insert(index);
+		if (ranges::distance(nonzero) == 0)
+		{
+			// 0 <= b or 0 = b
+			if (
+				constraint.data.front() < 0 ||
+				(constraint.equality && constraint.data.front() != 0)
+			)
+				return false; // Infeasible.
+		}
+		else
+		{
+			auto&& [varIndex, factor] = nonzero.front();
+			// a * x <= b
+			rational bound = constraint.data[0] / factor;
+			if (
+				(factor >= 0 || constraint.equality) &&
+				(!_state.bounds[varIndex][1] || bound < _state.bounds[varIndex][1])
+			)
+				_state.bounds[varIndex][1] = bound;
+			if (
+				(factor <= 0 || constraint.equality) &&
+				(!_state.bounds[varIndex][0] || bound > _state.bounds[varIndex][0])
+			)
+				// Lower bound must be at least zero.
+				_state.bounds[varIndex][0] = max(rational{}, bound);
+		}
+	}
+	if (!constraintsToRemove.empty())
+	{
+		_changed = true;
+		eraseIndices(_state.constraints, constraintsToRemove);
+	}
+	return true;
+}
+
+bool removeFixedVariables(SolvingState& _state, bool& _changed)
+{
+	set<size_t> variablesToRemove;
+	// Remove variables that have equal lower and upper bound.
+	for (auto const& [index, bounds]: _state.bounds | ranges::views::enumerate)
+	{
+		if (!bounds[1])
+			continue;
+		// Lower bound must be at least zero.
+		rational lower = max(rational{}, bounds[0] ? *bounds[0] : rational{});
+		rational upper = *bounds[1];
+		if (upper < lower)
+			return false; // Infeasible.
+		if (upper != lower)
+			continue;
+		////cout << "Removing variable " << _state.variableNames[index] << endl;
+		for (Constraint& constraint: _state.constraints)
+		{
+			if (constraint.data.at(index) != 0)
+			{
+				constraint.data[0] -= constraint.data[index] * lower;
+				constraint.data[index] = 0;
+			}
+			variablesToRemove.insert(index);
+		}
+	}
+
+	if (!variablesToRemove.empty())
+	{
+		_changed = true;
+		eraseIndices(_state.bounds, variablesToRemove);
+		for (Constraint& constraint: _state.constraints)
+			eraseIndices(constraint.data, variablesToRemove);
+		eraseIndices(_state.variableNames, variablesToRemove);
+	}
+	return true;
+}
+
 bool simplifySolvingState(SolvingState& _state)
 {
-	/*
-// - Keep upper and lower bounds.
-// - search the matrix for rows with only one nonzero variable coefficient
-//  -> update the bounds with that and remove the row.
-// - if a row is empty (up to the constant), remove it or return "infeasible"
-// - if a column is empty, we could remove it, but that would disturb the indices
-// - if a variable has matching bounds, remove it from the problem by substitution
-//   (we might not want to change the indices, though)
+	// TODO remove empty columns.
 
-// removing variables:
-// if we turn 'bounds' into a vector, we can also just remove from there.
-// only problem is that the inverse mapping might be problematic
-// but we can make that a vector, too.
-// TODO
-// remove variables isolated from the rest of the system.
-// remove variables with a fixed value
+	// - Constraints with exactly one nonzero coefficient represent "a x <= b"
+	//   and thus are turned into bounds.
+	// - Constraints with zero nonzero coefficients are constant relations.
+	//   If such a relation is false, answer "infeasible", otherwise remove the constraint.
+	// - Empty columns can be removed.
+	// - Variables with matching bounds can be removed from the problem by substitution.
 
-*/
+	bool changed = true;
+	while (changed)
+	{
+		changed = false;
+
+		if (!extractDirectConstraints(_state, changed))
+			return false;
+
+		if (!removeFixedVariables(_state, changed))
+			return false;
+	}
+
+	// TODO return the values selected for named variables in order to
+	// be used when returning the model.
 	return boundsToConstraints(_state);
 }
 
@@ -579,33 +685,15 @@ void LPSolver::addAssertion(Expression const& _expr)
 	}
 	else if (_expr.name == "<=" || _expr.name == "=")
 	{
-		// TODO if a variable ends up being fixed (upper bound equal lower bound),
-		// we can remove it and replace all its references.
-		// this can only be done at checking time, though, as other
-		// added constraints might make the system infeasible.
-		// We can also leave it in and just replace everything.
 		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
 		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
 		if (!left || !right)
 			return;
 
+		// TODO we could do bounds computations earlier on.
 		vector<rational> data = *left - *right;
 		data[0] *= -1;
-		auto nonzero = data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
-			[](std::pair<size_t, rational> const& _x) { return _x.second != 0; }
-		);
-		if (ranges::distance(nonzero) == 1)
-		{
-			auto&& [index, factor] = nonzero.front();
-			// a * x <= b
-			rational bound = data[0] / factor;
-			if (factor >= 0 || _expr.name == "=")
-				addUpperBound(index, bound);
-			if (factor <= 0 || _expr.name == "=")
-				addLowerBound(index, bound);
-		}
-		else
-			m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
+		m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
 	}
 	else if (_expr.name == ">=")
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
@@ -625,21 +713,31 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	state.constraints = m_state.top().constraints;
 	normalizeRowLengths(state);
 
-	cout << "Solving LP:\n" << toString(state) << endl;
-	cout << "----------------------------------------" << endl;
+	//cout << endl;
+	//cout << "----------------------------------------" << endl;
+	//cout << "Solving LP:\n" << toString(state) << endl;
 	if (!simplifySolvingState(state))
 	{
-		cout << "LP: infeasible." << endl;
+		//cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	}
-	cout << "Simplified to:\n" << toString(state) << endl;
-	cout << "----------------------------------------" << endl;
-
-	// TODO assert that all bounds have been removed.
+	//cout << "Simplified to:\n" << toString(state) << endl;
+	//cout << "----------------------------------------" << endl;
 
 	bool solveInteger = false;
 
 	CheckResult smtResult;
+	solAssert(state.bounds.empty(), "");
+	if (state.constraints.empty())
+	{
+		//cout << "LP: feasible / unbounded, because no constraints left." << endl;
+		if (solveInteger)
+			return make_pair(CheckResult::UNKNOWN, vector<string>{});
+		else
+			smtResult = CheckResult::SATISFIABLE;
+	}
+
+
 	LPResult lpResult;
 	vector<rational> solution;
 	tie(lpResult, solution) = simplex(state.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(state.constraints.front().data.size() - 1, rational(bigint(1))));
@@ -647,7 +745,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	{
 	case LPResult::Feasible:
 	case LPResult::Unbounded:
-		cout << "LP: feasible / unbounded." << endl;
+		//cout << "LP: feasible / unbounded." << endl;
 		// We have to return "UNKNOWN" because we only solved the relaxation of the integer problem.
 		// TODO We could check if the solution is integer, though.
 		if (solveInteger)
@@ -656,10 +754,10 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 			smtResult = CheckResult::SATISFIABLE;
 		break;
 	case LPResult::Infeasible:
-		cout << "LP: infeasible." << endl;
+		//cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	case LPResult::Unknown:
-		cout << "LP: unknown." << endl;
+		//cout << "LP: unknown." << endl;
 		return make_pair(CheckResult::UNKNOWN, vector<string>{});
 		break;
 	}
@@ -727,14 +825,14 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 
 void LPSolver::addUpperBound(size_t _index, rational _value)
 {
-	cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
+	//cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
 	if (!m_state.top().bounds[_index][1] || _value < *m_state.top().bounds[_index][1])
 		m_state.top().bounds[_index][1] = move(_value);
 }
 
 void LPSolver::addLowerBound(size_t _index, rational _value)
 {
-	cout << "adding " << variableName(_index) << " >= " << toString(_value) << endl;
+	//cout << "adding " << variableName(_index) << " >= " << toString(_value) << endl;
 	if (!m_state.top().bounds[_index][0] || _value > *m_state.top().bounds[_index][0])
 		m_state.top().bounds[_index][0] = move(_value);
 }
