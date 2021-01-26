@@ -347,7 +347,9 @@ enum class LPResult
 /// Assumes the tableau has a trivial basic feasible solution.
 pair<LPResult, Tableau> simplexEq(Tableau _tableau)
 {
-	size_t iterations = 50 + _tableau.data[0].size() * 4;
+	size_t iterations = 50 + _tableau.data[0].size() * 2;
+	if (iterations > 60)
+		iterations = 60;
 	for (size_t step = 0; step <= iterations; ++step)
 	{
 		optional<size_t> pivotColumn = findPivotColumn(_tableau);
