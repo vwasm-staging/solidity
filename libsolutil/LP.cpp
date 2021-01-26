@@ -85,21 +85,24 @@ void resizeAndSet(vector<T>& _data, size_t _index, T _value)
 vector<rational>& operator/=(vector<rational>& _data, rational const& _divisor)
 {
 	for (rational& x: _data)
-		x /= _divisor;
+		if (x.numerator())
+			x /= _divisor;
 	return _data;
 }
 
 vector<rational>& operator*=(vector<rational>& _data, rational const& _factor)
 {
 	for (rational& x: _data)
-		x *= _factor;
+		if (x.numerator())
+			x *= _factor;
 	return _data;
 }
 
 vector<rational> operator*(rational const& _factor, vector<rational> _data)
 {
 	for (rational& x: _data)
-		x *= _factor;
+		if (x.numerator())
+			x *= _factor;
 	return _data;
 }
 
@@ -172,7 +175,7 @@ pair<vector<Constraint>, bool> toEquationalForm(vector<Constraint> _constraints)
 	for (Constraint& constraint: _constraints)
 	{
 		solAssert(constraint.data.size() == columns, "");
-		result.emplace_back(Constraint{move(constraint.data) + vector<rational>(varsNeeded, bigint{}), true});
+		result.emplace_back(Constraint{move(constraint.data) + vector<rational>(varsNeeded, rational{}), true});
 		if (!constraint.equality)
 		{
 			result.back().data[columns + currentVariable] = bigint(1);
@@ -223,12 +226,21 @@ void performPivot(Tableau& _tableau, size_t _pivotRow, size_t _pivotColumn)
 {
 	rational pivot = _tableau.data[_pivotRow][_pivotColumn];
 	solAssert(pivot != 0, "");
-	_tableau.data[_pivotRow] /= pivot;
+	if (pivot != 1)
+		_tableau.data[_pivotRow] /= pivot;
 	solAssert(_tableau.data[_pivotRow][_pivotColumn] == rational(1), "");
 
 	for (size_t i = 0; i < _tableau.data.size(); ++i)
-		if (i != _pivotRow && _tableau.data[i][_pivotColumn] != rational{})
-			_tableau.data[i] -= _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
+		if (i != _pivotRow)
+		{
+			if (_tableau.data[i][_pivotColumn] == rational{})
+			{
+			}
+			else if (_tableau.data[i][_pivotColumn] == rational{1})
+				_tableau.data[i] -= _tableau.data[_pivotRow];
+			else
+				_tableau.data[i] -= _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
+		}
 }
 /*
 void printVector(vector<rational> const& _v)
