@@ -561,7 +561,7 @@ bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 	for (auto const& [index, constraint]: _state.constraints | ranges::views::enumerate)
 	{
 		auto nonzero = constraint.data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
-			[](std::pair<size_t, rational> const& _x) { return _x.second != 0; }
+			[](std::pair<size_t, rational> const& _x) { return !!_x.second; }
 		);
 		// TODO we can exit early on in the loop above.
 		if (ranges::distance(nonzero) > 1)
@@ -795,11 +795,17 @@ void LPSolver::reset()
 
 void LPSolver::push()
 {
-	map<std::string, size_t> variables = m_state.back().variables;
+	if (m_state.back().infeasible)
+	{
+		m_state.emplace_back();
+		m_state.back().infeasible = true;
+		return;
+	}
+	map<string, size_t> variables = m_state.back().variables;
+	map<size_t, array<optional<boost::rational<bigint>>, 2>> bounds = m_state.back().bounds;
 	m_state.emplace_back();
 	m_state.back().variables = move(variables);
-	// TODO Copy over bounds once we use them in the assertion interface.
-	// althouh it will not be useful once we have conditional constraints
+	m_state.back().bounds = move(bounds);
 }
 
 void LPSolver::pop()
@@ -832,10 +838,11 @@ void LPSolver::addAssertion(Expression const& _expr)
 		if (!left || !right)
 			return;
 
-		// TODO we could do bounds computations earlier on.
 		vector<rational> data = *left - *right;
 		data[0] *= -1;
-		m_state.back().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
+		Constraint c{move(data), _expr.name == "="};
+		if (!tryAddDirectBounds(c))
+			m_state.back().constraints.push_back(move(c));
 	}
 	else if (_expr.name == ">=")
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
@@ -847,11 +854,14 @@ void LPSolver::addAssertion(Expression const& _expr)
 
 pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_expressionsToEvaluate*/)
 {
+	if (m_state.back().infeasible)
+		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+
 	SolvingState state;
 	for (auto&& [name, index]: m_state.back().variables)
 		resizeAndSet(state.variableNames, index, name);
-	size_t vars = state.variableNames.size();
-	state.bounds.resize(vars);
+	for (auto&& [index, value]: m_state.back().bounds)
+		resizeAndSet(state.bounds, index, value);
 	for (State const& s: m_state)
 		for (Constraint const& constraint: s.constraints)
 			state.constraints.push_back(constraint);
@@ -972,6 +982,41 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 	return factorForVariable(index, rational(bigint(1)));
 }
 
+bool LPSolver::tryAddDirectBounds(Constraint const& _constraint)
+{
+	auto nonzero = _constraint.data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
+		[](std::pair<size_t, rational> const& _x) { return !!_x.second; }
+	);
+	// TODO we can exit early on in the loop above.
+	if (ranges::distance(nonzero) > 1)
+		return false;
+
+//	cout << "adding direct bound." << endl;
+	if (ranges::distance(nonzero) == 0)
+	{
+		// 0 <= b or 0 = b
+		if (
+			_constraint.data.front() < 0 ||
+			(_constraint.equality && _constraint.data.front() != 0)
+		)
+		{
+//			cout << "SETTING INF" << endl;
+			m_state.back().infeasible = true;
+		}
+	}
+	else
+	{
+		auto&& [varIndex, factor] = nonzero.front();
+		// a * x <= b
+		rational bound = _constraint.data[0] / factor;
+		if (factor > 0 || _constraint.equality)
+			addUpperBound(varIndex, bound);
+		if (factor < 0 || _constraint.equality)
+			addLowerBound(varIndex, bound);
+	}
+	return true;
+}
+
 void LPSolver::addUpperBound(size_t _index, rational _value)
 {
 	//cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
@@ -981,6 +1026,8 @@ void LPSolver::addUpperBound(size_t _index, rational _value)
 
 void LPSolver::addLowerBound(size_t _index, rational _value)
 {
+	// Lower bound must be at least zero.
+	_value = max(_value, rational{});
 	//cout << "adding " << variableName(_index) << " >= " << toString(_value) << endl;
 	if (!m_state.back().bounds[_index][0] || _value > *m_state.back().bounds[_index][0])
 		m_state.back().bounds[_index][0] = move(_value);
