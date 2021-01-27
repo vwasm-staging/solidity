@@ -243,6 +243,7 @@ void performPivot(Tableau& _tableau, size_t _pivotRow, size_t _pivotColumn)
 				_tableau.data[i] -= _tableau.data[i][_pivotColumn] * _tableau.data[_pivotRow];
 		}
 }
+
 /*
 void printVector(vector<rational> const& _v)
 {
@@ -250,10 +251,10 @@ void printVector(vector<rational> const& _v)
 		cout << toString(element, 3) << ", ";
 	cout << endl;
 }
-
+*/
 vector<rational> optimalVector(Tableau const& _tableau);
 
-
+/*
 void printTableau(Tableau _tableau)
 {
 	cout << "------------" << endl;
@@ -263,7 +264,7 @@ void printTableau(Tableau _tableau)
 	cout << "Solution: ";
 	printVector(optimalVector(_tableau));
 }
-
+*/
 
 string toString(SolvingState const& _state)
 {
@@ -299,7 +300,6 @@ string toString(SolvingState const& _state)
 	}
 	return result;
 }
-*/
 
 void selectLastVectorsAsBasis(Tableau& _tableau)
 {
@@ -499,7 +499,7 @@ bool boundsToConstraints(SolvingState& _state)
 	size_t columns = _state.variableNames.size();
 
 	// Turn bounds into constraints.
-	for (auto const& [index, bounds]: _state.bounds | ranges::views::enumerate)
+	for (auto const& [index, bounds]: _state.bounds | ranges::views::enumerate | ranges::views::tail)
 	{
 		if (bounds[0] && bounds[1])
 		{
@@ -534,7 +534,7 @@ bool boundsToConstraints(SolvingState& _state)
 }
 
 template <class T>
-void eraseIndices(vector<T>& _data, set<size_t>& _indices)
+void eraseIndices(vector<T>& _data, set<size_t> const& _indices)
 {
 	// TODO make this more efficient.
 	vector<T> result;
@@ -543,6 +543,16 @@ void eraseIndices(vector<T>& _data, set<size_t>& _indices)
 			result.emplace_back(move(_data[i]));
 	_data = move(result);
 }
+
+
+void removeColumns(SolvingState& _state, set<size_t> const& _columnsToRemove)
+{
+	eraseIndices(_state.bounds, _columnsToRemove);
+	for (Constraint& constraint: _state.constraints)
+		eraseIndices(constraint.data, _columnsToRemove);
+	eraseIndices(_state.variableNames, _columnsToRemove);
+}
+
 
 bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 {
@@ -622,10 +632,7 @@ bool removeFixedVariables(SolvingState& _state, bool& _changed)
 	if (!variablesToRemove.empty())
 	{
 		_changed = true;
-		eraseIndices(_state.bounds, variablesToRemove);
-		for (Constraint& constraint: _state.constraints)
-			eraseIndices(constraint.data, variablesToRemove);
-		eraseIndices(_state.variableNames, variablesToRemove);
+		removeColumns(_state, variablesToRemove);
 	}
 	return true;
 }
@@ -649,12 +656,93 @@ bool removeEmptyColumns(SolvingState& _state, bool& _changed)
 	if (!variablesToRemove.empty())
 	{
 		_changed = true;
-		eraseIndices(_state.bounds, variablesToRemove);
-		for (Constraint& constraint: _state.constraints)
-			eraseIndices(constraint.data, variablesToRemove);
-		eraseIndices(_state.variableNames, variablesToRemove);
+		removeColumns(_state, variablesToRemove);
 	}
 	return true;
+}
+
+auto nonZeroEntriesInColumn(SolvingState& _state, size_t _column)
+{
+	return
+		_state.constraints |
+		ranges::views::enumerate |
+		ranges::views::filter([=](auto const& _entry) { return _entry.second.data[_column] != 0; }) |
+		ranges::views::transform([](auto const& _entry) { return _entry.first; });
+}
+
+pair<vector<bool>, vector<bool>> firstConnectedComponent(SolvingState& _state)
+{
+	solAssert(_state.variableNames.size() >= 2, "");
+
+	vector<bool> includedColumns(_state.variableNames.size(), false);
+	vector<bool> includedRows(_state.constraints.size(), false);
+	stack<size_t> columnsToProcess;
+	columnsToProcess.push(1);
+	while (!columnsToProcess.empty())
+	{
+		size_t column = columnsToProcess.top();
+		columnsToProcess.pop();
+		if (includedColumns[column])
+			continue;
+		includedColumns[column] = true;
+
+		for (size_t row: nonZeroEntriesInColumn(_state, column))
+		{
+			if (includedRows[row])
+				continue;
+			includedRows[row] = true;
+			for (auto const& [index, entry]: _state.constraints[row].data | ranges::view::enumerate | ranges::views::tail)
+				if (entry && !includedColumns[index])
+					columnsToProcess.push(index);
+		}
+	}
+	return make_pair(move(includedColumns), move(includedRows));
+}
+
+SolvingState splitProblem(SolvingState& _state)
+{
+	vector<bool> includedColumns;
+	vector<bool> includedRows;
+	tie(includedColumns, includedRows) = firstConnectedComponent(_state);
+	// "+ 1" because the constant column is included implicitly.
+	size_t columnCount = static_cast<size_t>(ranges::count_if(includedColumns, ranges::identity{})) + 1;
+	cout << "Splitting off " << (columnCount - 1) << " of " << (_state.variableNames.size() - 1) << " variables." << endl;
+	SolvingState splitOff;
+	if (columnCount == _state.variableNames.size())
+	{
+		splitOff = move(_state);
+		_state = SolvingState();
+	}
+	else
+	{
+		splitOff.variableNames.emplace_back();
+		splitOff.bounds.emplace_back();
+
+		set<size_t> variablesToRemove;
+		for (auto&& [i, included]: includedColumns | ranges::views::enumerate | ranges::views::tail)
+		{
+			if (!included)
+				continue;
+			variablesToRemove.insert(i);
+			splitOff.variableNames.emplace_back(move(_state.variableNames[i]));
+			splitOff.bounds.emplace_back(move(_state.bounds[i]));
+		}
+		set<size_t> rowsToRemove;
+		for (auto&& [i, included]: includedRows | ranges::views::enumerate)
+		{
+			if (!included)
+				continue;
+			rowsToRemove.insert(i);
+			Constraint splitRow{{}, _state.constraints[i].equality};
+			for (size_t j = 0; j < _state.constraints[i].data.size(); j++)
+				if (j == 0 || includedColumns[j])
+					splitRow.data.push_back(_state.constraints[i].data[j]);
+			splitOff.constraints.push_back(move(splitRow));
+		}
+		removeColumns(_state, variablesToRemove);
+		eraseIndices(_state.constraints, rowsToRemove);
+	}
+	return splitOff;
 }
 
 bool simplifySolvingState(SolvingState& _state)
@@ -683,7 +771,7 @@ bool simplifySolvingState(SolvingState& _state)
 
 	// TODO return the values selected for named variables in order to
 	// be used when returning the model.
-	return boundsToConstraints(_state);
+	return true;
 }
 
 void normalizeRowLengths(SolvingState& _state)
@@ -752,7 +840,7 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 }
 
-pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
+pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_expressionsToEvaluate*/)
 {
 	SolvingState state;
 	for (auto&& [name, index]: m_state.top().variables)
@@ -762,55 +850,58 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	state.constraints = m_state.top().constraints;
 	normalizeRowLengths(state);
 
-	//cout << endl;
-	//cout << "----------------------------------------" << endl;
-	//cout << "Solving LP:\n" << toString(state) << endl;
+	cout << endl;
+	cout << "----------------------------------------" << endl;
+	cout << "Solving LP:\n" << toString(state) << endl;
 	if (!simplifySolvingState(state))
 	{
 		//cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	}
-	//cout << "Simplified to:\n" << toString(state) << endl;
-	//cout << "----------------------------------------" << endl;
+	cout << "Simplified to:\n" << toString(state) << endl;
+	cout << "----------------------------------------" << endl;
+
+	while (!state.constraints.empty())
+	{
+		SolvingState split = splitProblem(state);
+		solAssert(!split.constraints.empty(), "");
+		solAssert(split.variableNames.size() >= 2, "");
+		cout << "Split off:\n" << toString(split) << endl;
+		cout << "----------------------------------------" << endl;
+		if (!boundsToConstraints(split))
+			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+
+		LPResult lpResult;
+		vector<rational> solution;
+		tie(lpResult, solution) = simplex(split.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(split.constraints.front().data.size() - 1, rational(bigint(1))));
+		switch (lpResult)
+		{
+		case LPResult::Feasible:
+		case LPResult::Unbounded:
+			break;
+		case LPResult::Infeasible:
+			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+		case LPResult::Unknown:
+			return make_pair(CheckResult::UNKNOWN, vector<string>{});
+			break;
+		}
+	}
+	cout << "No more sub-problems to split off." << endl;
+	cout << "----------------------------------------" << endl;
 
 	bool solveInteger = false;
 
-	CheckResult smtResult;
-	solAssert(state.bounds.empty(), "");
-	if (state.constraints.empty())
-	{
-		//cout << "LP: feasible / unbounded, because no constraints left." << endl;
-		if (solveInteger)
-			return make_pair(CheckResult::UNKNOWN, vector<string>{});
-		else
-			// TODO evaluated model based on removed variables
-			return make_pair(CheckResult::SATISFIABLE, vector<string>{});
-	}
+	//cout << "LP: feasible / unbounded, because no constraints left." << endl;
+	if (solveInteger)
+		return make_pair(CheckResult::UNKNOWN, vector<string>{});
+	else
+		// TODO evaluated model based on removed variables
+		return make_pair(CheckResult::SATISFIABLE, vector<string>{});
 
-
+#if 0
 	LPResult lpResult;
 	vector<rational> solution;
 	tie(lpResult, solution) = simplex(state.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(state.constraints.front().data.size() - 1, rational(bigint(1))));
-	switch (lpResult)
-	{
-	case LPResult::Feasible:
-	case LPResult::Unbounded:
-		//cout << "LP: feasible / unbounded." << endl;
-		// We have to return "UNKNOWN" because we only solved the relaxation of the integer problem.
-		// TODO We could check if the solution is integer, though.
-		if (solveInteger)
-			return make_pair(CheckResult::UNKNOWN, vector<string>{});
-		else
-			smtResult = CheckResult::SATISFIABLE;
-		break;
-	case LPResult::Infeasible:
-		//cout << "LP: infeasible." << endl;
-		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
-	case LPResult::Unknown:
-		//cout << "LP: unknown." << endl;
-		return make_pair(CheckResult::UNKNOWN, vector<string>{});
-		break;
-	}
 
 	vector<string> model;
 	for (Expression const& e: _expressionsToEvaluate)
@@ -828,6 +919,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 		}
 	}
 	return make_pair(smtResult, move(model));
+#endif
 }
 
 optional<vector<rational>> LPSolver::parseLinearSum(smtutil::Expression const& _expr) const
