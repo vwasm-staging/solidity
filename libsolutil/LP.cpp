@@ -250,10 +250,10 @@ void printVector(vector<rational> const& _v)
 		cout << toString(element, 3) << ", ";
 	cout << endl;
 }
-*/
+
 vector<rational> optimalVector(Tableau const& _tableau);
 
-/*
+
 void printTableau(Tableau _tableau)
 {
 	cout << "------------" << endl;
@@ -410,12 +410,12 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 		vector<rational>(columns, rational{}) +
 		vector<rational>(rows - 1, rational{-1});
 
-	////cout << "Phase I tableau: " << endl;
+	//cout << "Phase I tableau: " << endl;
 	//printTableau(_tableau);
 
 	selectLastVectorsAsBasis(_tableau);
 
-	////cout << "After basis selection: " << endl;
+	//cout << "After basis selection: " << endl;
 	//printTableau(_tableau);
 
 	LPResult result;
@@ -428,18 +428,21 @@ pair<LPResult, Tableau> simplexPhaseI(Tableau _tableau)
 		return make_pair(LPResult::Unknown, Tableau{});
 	}
 	vector<rational> optimum = optimalVector(_tableau);
-	////cout << "PhaseI solution: ";
+	//cout << "PhaseI solution: ";
 	//printVector(optimum);
 
 	for (size_t i = columns - 1; i < optimum.size(); ++i)
 		if (optimum[i] != 0)
+		{
+			//cout << "Phase I => infeasible." << endl;
 			return make_pair(LPResult::Infeasible, Tableau{});
+		}
 
 	_tableau.data[0] = originalObjective;
 	for (size_t i = 1; i < rows; ++i)
 		_tableau.data[i].resize(columns);
 
-	////cout << "Tableau after Phase I: " << endl;
+	//cout << "Tableau after Phase I: " << endl;
 	//printTableau(_tableau);
 
 	// TODO do we need to select a basis?
@@ -480,18 +483,15 @@ pair<LPResult, vector<rational>> simplex(vector<Constraint> _constraints, vector
 		if (result == LPResult::Infeasible || result == LPResult::Unknown)
 			return make_pair(result, vector<rational>{});
 		solAssert(result == LPResult::Feasible, "");
+		//cout << "Phase I returned feasible." << endl;
 	}
-	return make_pair(LPResult::Unknown, vector<rational>{});
+	// We know that the system is satisfyable and we know a solution,
+	// but it is not optimal.
+	// TODO is the tableau always in a form to compute a solution?
 	LPResult result;
-	vector<rational> optimum;
 	tie(result, tableau) = simplexEq(move(tableau));
-	if (result == LPResult::Feasible || result == LPResult::Unbounded)
-	{
-		optimum = optimalVector(tableau);
-		////cout << "Solution: " << endl;
-		//printVector(optimum);
-	}
-	return make_pair(result, move(optimum));
+	solAssert(result == LPResult::Feasible || result == LPResult::Unbounded, "");
+	return make_pair(result, optimalVector(tableau));
 }
 
 bool boundsToConstraints(SolvingState& _state)
@@ -877,28 +877,31 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 			state.constraints.push_back(constraint);
 	normalizeRowLengths(state);
 
-//	cout << endl;
-//	cout << "----------------------------------------" << endl;
-//	cout << "Solving LP:\n" << toString(state) << endl;
+	//cout << endl;
+	//cout << "----------------------------------------" << endl;
+	//cout << "Solving LP:\n" << toString(state) << endl;
 	map<string, rational> model;
 
 	if (!simplifySolvingState(state, model))
 	{
-//		cout << "LP: infeasible." << endl;
+		//cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	}
-//	cout << "Simplified to:\n" << toString(state) << endl;
-//	cout << "----------------------------------------" << endl;
+	//cout << "Simplified to:\n" << toString(state) << endl;
+	//cout << "----------------------------------------" << endl;
 
 	while (!state.constraints.empty())
 	{
 		SolvingState split = splitProblem(state);
 		solAssert(!split.constraints.empty(), "");
 		solAssert(split.variableNames.size() >= 2, "");
-//		cout << "Split off:\n" << toString(split) << endl;
-//		cout << "----------------------------------------" << endl;
+		//cout << "Split off:\n" << toString(split) << endl;
+		//cout << "----------------------------------------" << endl;
 		if (!boundsToConstraints(split))
+		{
+			//cout << "infeasible due to constraints" << endl;
 			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+		}
 
 		LPResult lpResult;
 		vector<rational> solution;
@@ -907,15 +910,19 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 		{
 		case LPResult::Feasible:
 		case LPResult::Unbounded:
+			//cout << "feasible or unbounded after simplex" << endl;
 			break;
 		case LPResult::Infeasible:
+			//cout << "infeasible after simplex" << endl;
 			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 		case LPResult::Unknown:
+			//cout << "unknown after simplex" << endl;
 			return make_pair(CheckResult::UNKNOWN, vector<string>{});
 			break;
 		}
 		for (auto&& [index, value]: solution | ranges::views::enumerate)
-			model[split.variableNames.at(index)] = value;
+			if (index + 1 < split.variableNames.size())
+				model[split.variableNames.at(index + 1)] = value;
 	}
 //	cout << "No more sub-problems to split off." << endl;
 //	cout << "----------------------------------------" << endl;
@@ -930,7 +937,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	for (Expression const& e: _expressionsToEvaluate)
 	{
 		if (e.arguments.empty() && model.count(e.name))
-			requestedModel.emplace_back(toString(model[e.name]));
+			requestedModel.emplace_back(toString(model[e.name], 0));
 		else
 		{
 			requestedModel = {};
@@ -992,7 +999,7 @@ bool LPSolver::tryAddDirectBounds(Constraint const& _constraint)
 	if (ranges::distance(nonzero) > 1)
 		return false;
 
-//	cout << "adding direct bound." << endl;
+	//cout << "adding direct bound." << endl;
 	if (ranges::distance(nonzero) == 0)
 	{
 		// 0 <= b or 0 = b

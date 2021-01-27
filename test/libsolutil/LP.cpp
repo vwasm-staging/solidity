@@ -89,6 +89,18 @@ BOOST_AUTO_TEST_CASE(two_vars)
 	feasible({{x, "1"}, {y, "3"}});
 }
 
+
+BOOST_AUTO_TEST_CASE(factors)
+{
+	Expression x = variable("x");
+	Expression y = variable("y");
+	solver.addAssertion(2 * y <= 3);
+	solver.addAssertion(16 * x <= 10);
+	solver.addAssertion(4 >= x + y);
+	feasible({{x, "5/8"}, {y, "3/2"}});
+}
+
+
 BOOST_AUTO_TEST_CASE(lower_bound)
 {
 	Expression x = variable("x");
@@ -200,7 +212,37 @@ BOOST_AUTO_TEST_CASE(chained_less_than)
 	solver.addAssertion(z == 2);
 	feasible({{x, "0"}, {y, "1"}, {z, "2"}});
 	solver.pop();
+}
 
+BOOST_AUTO_TEST_CASE(splittable)
+{
+	Expression x = variable("x");
+	Expression y = variable("y");
+	Expression z = variable("z");
+	Expression w = variable("w");
+	solver.addAssertion(x < y);
+	solver.addAssertion(x < y - 2);
+	solver.addAssertion(z + w == 28);
+
+	solver.push();
+	solver.addAssertion(z >= 30);
+	infeasible();
+	solver.pop();
+
+	solver.addAssertion(z >= 2);
+	feasible({{x, "0"}, {y, "3"}, {z, "2"}, {w, "26"}});
+	solver.push();
+	solver.addAssertion(z >= 4);
+	feasible({{x, "0"}, {y, "3"}, {z, "4"}, {w, "24"}});
+
+	solver.push();
+	solver.addAssertion(z < 4);
+	infeasible();
+	solver.pop();
+
+	// z >= 4 is still active
+	solver.addAssertion(z >= 3);
+	feasible({{x, "0"}, {y, "3"}, {z, "4"}, {w, "24"}});
 }
 
 
