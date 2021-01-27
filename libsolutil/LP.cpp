@@ -28,6 +28,7 @@
 #include <range/v3/view/tail.hpp>
 #include <range/v3/view/iota.hpp>
 #include <range/v3/algorithm/all_of.hpp>
+#include <range/v3/algorithm/any_of.hpp>
 #include <range/v3/algorithm/max.hpp>
 #include <range/v3/algorithm/count_if.hpp>
 #include <range/v3/iterator/operations.hpp>
@@ -629,10 +630,35 @@ bool removeFixedVariables(SolvingState& _state, bool& _changed)
 	return true;
 }
 
+bool removeEmptyColumns(SolvingState& _state, bool& _changed)
+{
+	vector<bool> variablesSeen(_state.bounds.size(), false);
+	for (auto const& constraint: _state.constraints)
+	{
+		for (auto&& [index, factor]: constraint.data | ranges::views::enumerate | ranges::views::tail)
+			if (factor)
+				variablesSeen[index] = true;
+	}
+
+	// TODO we could assert that any variable we remove does not have conflicting bounds.
+
+	set<size_t> variablesToRemove;
+	for (auto&& [i, seen]: variablesSeen | ranges::views::enumerate | ranges::views::tail)
+		if (!seen)
+			variablesToRemove.insert(i);
+	if (!variablesToRemove.empty())
+	{
+		_changed = true;
+		eraseIndices(_state.bounds, variablesToRemove);
+		for (Constraint& constraint: _state.constraints)
+			eraseIndices(constraint.data, variablesToRemove);
+		eraseIndices(_state.variableNames, variablesToRemove);
+	}
+	return true;
+}
+
 bool simplifySolvingState(SolvingState& _state)
 {
-	// TODO remove empty columns.
-
 	// - Constraints with exactly one nonzero coefficient represent "a x <= b"
 	//   and thus are turned into bounds.
 	// - Constraints with zero nonzero coefficients are constant relations.
@@ -649,6 +675,9 @@ bool simplifySolvingState(SolvingState& _state)
 			return false;
 
 		if (!removeFixedVariables(_state, changed))
+			return false;
+
+		if (!removeEmptyColumns(_state, changed))
 			return false;
 	}
 
@@ -754,7 +783,8 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 		if (solveInteger)
 			return make_pair(CheckResult::UNKNOWN, vector<string>{});
 		else
-			smtResult = CheckResult::SATISFIABLE;
+			// TODO evaluated model based on removed variables
+			return make_pair(CheckResult::SATISFIABLE, vector<string>{});
 	}
 
 
