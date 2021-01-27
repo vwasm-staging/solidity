@@ -82,7 +82,7 @@ private:
 
 	std::string variableName(size_t _index) const;
 
-	std::stack<State> m_state{{State{}}};
+	std::vector<State> m_state{{State{}}};
 };
 
 

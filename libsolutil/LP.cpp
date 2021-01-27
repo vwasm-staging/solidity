@@ -45,7 +45,7 @@ using rational = boost::rational<bigint>;
 
 namespace
 {
-
+/*
 string toString(rational const& _value, size_t _paddedLength = 2)
 {
 	string result;
@@ -61,7 +61,7 @@ string toString(rational const& _value, size_t _paddedLength = 2)
 		result = string(_paddedLength - result.length(), ' ') + result;
 	return result;
 }
-
+*/
 
 vector<rational> factorForVariable(size_t _index, rational _factor)
 {
@@ -264,7 +264,7 @@ void printTableau(Tableau _tableau)
 	cout << "Solution: ";
 	printVector(optimalVector(_tableau));
 }
-*/
+
 
 string toString(SolvingState const& _state)
 {
@@ -300,6 +300,7 @@ string toString(SolvingState const& _state)
 	}
 	return result;
 }
+*/
 
 void selectLastVectorsAsBasis(Tableau& _tableau)
 {
@@ -372,9 +373,9 @@ pair<LPResult, Tableau> simplexEq(Tableau _tableau)
 			//vector<rational> optimum = optimalVector(_tableau);
 			//printVector(optimum);
 
-			cout << "Feasible after " << step << " steps." << endl;
-			cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
-			cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
+//			cout << "Feasible after " << step << " steps." << endl;
+//			cout << "Constraints: " << (_tableau.data.size() - 1) << endl;
+//			cout << "Variables: " << (_tableau.data[0].size() - 1) << endl;
 			return make_pair(LPResult::Feasible, move(_tableau));
 		}
 		////cout << "Pivot column: " << *pivotColumn << endl;
@@ -553,7 +554,6 @@ void removeColumns(SolvingState& _state, set<size_t> const& _columnsToRemove)
 	eraseIndices(_state.variableNames, _columnsToRemove);
 }
 
-
 bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 {
 	// Turn constraints of the form ax <= b into an upper bound on x.
@@ -706,7 +706,7 @@ SolvingState splitProblem(SolvingState& _state)
 	tie(includedColumns, includedRows) = firstConnectedComponent(_state);
 	// "+ 1" because the constant column is included implicitly.
 	size_t columnCount = static_cast<size_t>(ranges::count_if(includedColumns, ranges::identity{})) + 1;
-	cout << "Splitting off " << (columnCount - 1) << " of " << (_state.variableNames.size() - 1) << " variables." << endl;
+	//cout << "Splitting off " << (columnCount - 1) << " of " << (_state.variableNames.size() - 1) << " variables." << endl;
 	SolvingState splitOff;
 	if (columnCount == _state.variableNames.size())
 	{
@@ -785,21 +785,26 @@ void normalizeRowLengths(SolvingState& _state)
 		c.data.resize(vars);
 }
 
+
 }
 
 void LPSolver::reset()
 {
-	m_state = stack<State>{{State{}}};
+	m_state = vector<State>{{State{}}};
 }
 
 void LPSolver::push()
 {
-	m_state.push(m_state.top());
+	map<std::string, size_t> variables = m_state.back().variables;
+	m_state.emplace_back();
+	m_state.back().variables = move(variables);
+	// TODO Copy over bounds once we use them in the assertion interface.
+	// althouh it will not be useful once we have conditional constraints
 }
 
 void LPSolver::pop()
 {
-	m_state.pop();
+	m_state.pop_back();
 	solAssert(!m_state.empty(), "");
 }
 
@@ -808,9 +813,9 @@ void LPSolver::declareVariable(string const& _name, SortPointer const& _sort)
 	// TODO This will not be an integer variable in our model.
 	// Introduce a new kind?
 	solAssert(_sort && _sort->kind == Kind::Int, "");
-	solAssert(!m_state.top().variables.count(_name), "");
-	size_t index = m_state.top().variables.size() + 1;
-	m_state.top().variables[_name] = index;
+	solAssert(!m_state.back().variables.count(_name), "");
+	size_t index = m_state.back().variables.size() + 1;
+	m_state.back().variables[_name] = index;
 }
 
 void LPSolver::addAssertion(Expression const& _expr)
@@ -830,7 +835,7 @@ void LPSolver::addAssertion(Expression const& _expr)
 		// TODO we could do bounds computations earlier on.
 		vector<rational> data = *left - *right;
 		data[0] *= -1;
-		m_state.top().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
+		m_state.back().constraints.emplace_back(Constraint{move(data), _expr.name == "="});
 	}
 	else if (_expr.name == ">=")
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
@@ -843,31 +848,33 @@ void LPSolver::addAssertion(Expression const& _expr)
 pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_expressionsToEvaluate*/)
 {
 	SolvingState state;
-	for (auto&& [name, index]: m_state.top().variables)
+	for (auto&& [name, index]: m_state.back().variables)
 		resizeAndSet(state.variableNames, index, name);
-	for (auto&& [index, bound]: m_state.top().bounds)
-		resizeAndSet(state.bounds, index, bound);
-	state.constraints = m_state.top().constraints;
+	size_t vars = state.variableNames.size();
+	state.bounds.resize(vars);
+	for (State const& s: m_state)
+		for (Constraint const& constraint: s.constraints)
+			state.constraints.push_back(constraint);
 	normalizeRowLengths(state);
 
-	cout << endl;
-	cout << "----------------------------------------" << endl;
-	cout << "Solving LP:\n" << toString(state) << endl;
+//	cout << endl;
+//	cout << "----------------------------------------" << endl;
+//	cout << "Solving LP:\n" << toString(state) << endl;
 	if (!simplifySolvingState(state))
 	{
 		//cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	}
-	cout << "Simplified to:\n" << toString(state) << endl;
-	cout << "----------------------------------------" << endl;
+//	cout << "Simplified to:\n" << toString(state) << endl;
+//	cout << "----------------------------------------" << endl;
 
 	while (!state.constraints.empty())
 	{
 		SolvingState split = splitProblem(state);
 		solAssert(!split.constraints.empty(), "");
 		solAssert(split.variableNames.size() >= 2, "");
-		cout << "Split off:\n" << toString(split) << endl;
-		cout << "----------------------------------------" << endl;
+//		cout << "Split off:\n" << toString(split) << endl;
+//		cout << "----------------------------------------" << endl;
 		if (!boundsToConstraints(split))
 			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 
@@ -886,8 +893,8 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_e
 			break;
 		}
 	}
-	cout << "No more sub-problems to split off." << endl;
-	cout << "----------------------------------------" << endl;
+//	cout << "No more sub-problems to split off." << endl;
+//	cout << "----------------------------------------" << endl;
 
 	bool solveInteger = false;
 
@@ -960,7 +967,7 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 	else if (_expr.name == "false")
 		return vector<rational>{rational(bigint(0))};
 
-	size_t index = m_state.top().variables.at(_expr.name);
+	size_t index = m_state.back().variables.at(_expr.name);
 	solAssert(index > 0, "");
 	return factorForVariable(index, rational(bigint(1)));
 }
@@ -968,21 +975,21 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 void LPSolver::addUpperBound(size_t _index, rational _value)
 {
 	//cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
-	if (!m_state.top().bounds[_index][1] || _value < *m_state.top().bounds[_index][1])
-		m_state.top().bounds[_index][1] = move(_value);
+	if (!m_state.back().bounds[_index][1] || _value < *m_state.back().bounds[_index][1])
+		m_state.back().bounds[_index][1] = move(_value);
 }
 
 void LPSolver::addLowerBound(size_t _index, rational _value)
 {
 	//cout << "adding " << variableName(_index) << " >= " << toString(_value) << endl;
-	if (!m_state.top().bounds[_index][0] || _value > *m_state.top().bounds[_index][0])
-		m_state.top().bounds[_index][0] = move(_value);
+	if (!m_state.back().bounds[_index][0] || _value > *m_state.back().bounds[_index][0])
+		m_state.back().bounds[_index][0] = move(_value);
 }
 
 
 string LPSolver::variableName(size_t _index) const
 {
-	for (auto const& v: m_state.top().variables)
+	for (auto const& v: m_state.back().variables)
 		if (v.second == _index)
 			return v.first;
 	return {};
