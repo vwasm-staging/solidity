@@ -890,6 +890,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	//cout << "Simplified to:\n" << toString(state) << endl;
 	//cout << "----------------------------------------" << endl;
 
+	bool canOnlyBeUnknown = false;
 	while (!state.constraints.empty())
 	{
 		SolvingState split = splitProblem(state);
@@ -905,6 +906,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 
 		LPResult lpResult;
 		vector<rational> solution;
+		//cout << "simplex query with " << split.variableNames.size() << " variables" << endl;
 		tie(lpResult, solution) = simplex(split.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(split.constraints.front().data.size() - 1, rational(bigint(1))));
 		switch (lpResult)
 		{
@@ -917,7 +919,8 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 		case LPResult::Unknown:
 			//cout << "unknown after simplex" << endl;
-			return make_pair(CheckResult::UNKNOWN, vector<string>{});
+			// We do not stop here, because another independent query can still be infeasible.
+			canOnlyBeUnknown = true;
 			break;
 		}
 		for (auto&& [index, value]: solution | ranges::views::enumerate)
@@ -930,7 +933,7 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	bool solveInteger = false;
 
 	//cout << "LP: feasible / unbounded, because no constraints left." << endl;
-	if (solveInteger)
+	if (solveInteger || canOnlyBeUnknown)
 		return make_pair(CheckResult::UNKNOWN, vector<string>{});
 
 	vector<string> requestedModel;
