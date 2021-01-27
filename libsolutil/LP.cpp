@@ -45,7 +45,7 @@ using rational = boost::rational<bigint>;
 
 namespace
 {
-/*
+
 string toString(rational const& _value, size_t _paddedLength = 2)
 {
 	string result;
@@ -61,7 +61,6 @@ string toString(rational const& _value, size_t _paddedLength = 2)
 		result = string(_paddedLength - result.length(), ' ') + result;
 	return result;
 }
-*/
 
 vector<rational> factorForVariable(size_t _index, rational _factor)
 {
@@ -602,7 +601,7 @@ bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 	return true;
 }
 
-bool removeFixedVariables(SolvingState& _state, bool& _changed)
+bool removeFixedVariables(SolvingState& _state, map<string, rational>& _model, bool& _changed)
 {
 	set<size_t> variablesToRemove;
 	// Remove variables that have equal lower and upper bound.
@@ -617,16 +616,17 @@ bool removeFixedVariables(SolvingState& _state, bool& _changed)
 			return false; // Infeasible.
 		if (upper != lower)
 			continue;
+		_model[_state.variableNames.at(index)] = lower;
+		variablesToRemove.insert(index);
 		////cout << "Removing variable " << _state.variableNames[index] << endl;
+
+		// substitute variable
 		for (Constraint& constraint: _state.constraints)
-		{
 			if (constraint.data.at(index) != 0)
 			{
 				constraint.data[0] -= constraint.data[index] * lower;
 				constraint.data[index] = 0;
 			}
-			variablesToRemove.insert(index);
-		}
 	}
 
 	if (!variablesToRemove.empty())
@@ -637,7 +637,7 @@ bool removeFixedVariables(SolvingState& _state, bool& _changed)
 	return true;
 }
 
-bool removeEmptyColumns(SolvingState& _state, bool& _changed)
+bool removeEmptyColumns(SolvingState& _state, map<string, rational>& _model, bool& _changed)
 {
 	vector<bool> variablesSeen(_state.bounds.size(), false);
 	for (auto const& constraint: _state.constraints)
@@ -648,11 +648,21 @@ bool removeEmptyColumns(SolvingState& _state, bool& _changed)
 	}
 
 	// TODO we could assert that any variable we remove does not have conflicting bounds.
+	// (We also remove the bounds).
 
 	set<size_t> variablesToRemove;
 	for (auto&& [i, seen]: variablesSeen | ranges::views::enumerate | ranges::views::tail)
 		if (!seen)
+		{
 			variablesToRemove.insert(i);
+			// TODO actually it is unbounded if _state.bounds.at(i)[1] is nullopt.
+			_model[_state.variableNames.at(i)] =
+				_state.bounds.at(i)[1] ?
+				*_state.bounds.at(i)[1] :
+				_state.bounds.at(i)[0] ?
+				*_state.bounds.at(i)[0] :
+				0;
+		}
 	if (!variablesToRemove.empty())
 	{
 		_changed = true;
@@ -745,7 +755,7 @@ SolvingState splitProblem(SolvingState& _state)
 	return splitOff;
 }
 
-bool simplifySolvingState(SolvingState& _state)
+bool simplifySolvingState(SolvingState& _state, map<string, rational>& _model)
 {
 	// - Constraints with exactly one nonzero coefficient represent "a x <= b"
 	//   and thus are turned into bounds.
@@ -762,10 +772,10 @@ bool simplifySolvingState(SolvingState& _state)
 		if (!extractDirectConstraints(_state, changed))
 			return false;
 
-		if (!removeFixedVariables(_state, changed))
+		if (!removeFixedVariables(_state, _model, changed))
 			return false;
 
-		if (!removeEmptyColumns(_state, changed))
+		if (!removeEmptyColumns(_state, _model, changed))
 			return false;
 	}
 
@@ -852,7 +862,7 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 }
 
-pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_expressionsToEvaluate*/)
+pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
 {
 	if (m_state.back().infeasible)
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
@@ -870,9 +880,11 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_e
 //	cout << endl;
 //	cout << "----------------------------------------" << endl;
 //	cout << "Solving LP:\n" << toString(state) << endl;
-	if (!simplifySolvingState(state))
+	map<string, rational> model;
+
+	if (!simplifySolvingState(state, model))
 	{
-		//cout << "LP: infeasible." << endl;
+//		cout << "LP: infeasible." << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
 	}
 //	cout << "Simplified to:\n" << toString(state) << endl;
@@ -902,6 +914,8 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_e
 			return make_pair(CheckResult::UNKNOWN, vector<string>{});
 			break;
 		}
+		for (auto&& [index, value]: solution | ranges::views::enumerate)
+			model[split.variableNames.at(index)] = value;
 	}
 //	cout << "No more sub-problems to split off." << endl;
 //	cout << "----------------------------------------" << endl;
@@ -911,32 +925,19 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& /*_e
 	//cout << "LP: feasible / unbounded, because no constraints left." << endl;
 	if (solveInteger)
 		return make_pair(CheckResult::UNKNOWN, vector<string>{});
-	else
-		// TODO evaluated model based on removed variables
-		return make_pair(CheckResult::SATISFIABLE, vector<string>{});
 
-#if 0
-	LPResult lpResult;
-	vector<rational> solution;
-	tie(lpResult, solution) = simplex(state.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(state.constraints.front().data.size() - 1, rational(bigint(1))));
-
-	vector<string> model;
+	vector<string> requestedModel;
 	for (Expression const& e: _expressionsToEvaluate)
 	{
-		if (e.arguments.empty() && m_state.top().variables.count(e.name))
-		{
-			size_t index = m_state.top().variables.at(e.name);
-			solAssert(index > 0, "");
-			model.emplace_back(toString(solution.at(index - 1), 0));
-		}
+		if (e.arguments.empty() && model.count(e.name))
+			requestedModel.emplace_back(toString(model[e.name]));
 		else
 		{
-			model = {};
+			requestedModel = {};
 			break;
 		}
 	}
-	return make_pair(smtResult, move(model));
-#endif
+	return make_pair(CheckResult::SATISFIABLE, move(requestedModel));
 }
 
 optional<vector<rational>> LPSolver::parseLinearSum(smtutil::Expression const& _expr) const
