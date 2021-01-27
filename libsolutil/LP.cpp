@@ -118,7 +118,8 @@ vector<rational>& operator-=(vector<rational>& _x, vector<rational> const& _y)
 {
 	solAssert(_x.size() == _y.size(), "");
 	for (size_t i = 0; i < _x.size(); ++i)
-		_x[i] -= _y[i];
+		if (_y[i].numerator())
+			_x[i] -= _y[i];
 	return _x;
 }
 
