@@ -26,6 +26,7 @@
 #include <vector>
 #include <variant>
 #include <stack>
+#include <compare>
 
 namespace solidity::util
 {
@@ -34,6 +35,9 @@ struct Constraint
 {
 	std::vector<boost::rational<bigint>> data;
 	bool equality = false;
+
+	bool operator<(Constraint const& _other) const;
+	bool operator==(Constraint const& _other) const;
 };
 
 struct SolvingState
@@ -41,7 +45,12 @@ struct SolvingState
 	std::vector<std::string> variableNames;
 	std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> bounds;
 	std::vector<Constraint> constraints;
+
+	bool operator<(SolvingState const& _other) const;
+	bool operator==(SolvingState const& _other) const;
+	std::string toString() const;
 };
+
 
 struct State
 {
@@ -49,6 +58,14 @@ struct State
 	std::map<std::string, size_t> variables;
 	std::vector<Constraint> constraints;
 	std::map<size_t, std::array<std::optional<boost::rational<bigint>>, 2>> bounds;
+};
+
+enum class LPResult
+{
+	Unknown,
+	Unbounded,
+	Feasible,
+	Infeasible
 };
 
 
@@ -85,6 +102,7 @@ private:
 	std::string variableName(size_t _index) const;
 
 	std::vector<State> m_state{{State{}}};
+	std::map<SolvingState, LPResult> m_cache;
 };
 
 

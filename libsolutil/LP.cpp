@@ -69,9 +69,10 @@ vector<rational> factorForVariable(size_t _index, rational _factor)
 	return result;
 }
 
-rational get(vector<rational> const& _data, size_t _index)
+rational const& get(vector<rational> const& _data, size_t _index)
 {
-	return _index < _data.size() ? _data[_index] : 0;
+	static rational const zero;
+	return _index < _data.size() ? _data[_index] : zero;
 }
 
 template <class T>
@@ -251,11 +252,12 @@ void printVector(vector<rational> const& _v)
 		cout << toString(element, 3) << ", ";
 	cout << endl;
 }
-
+*/
 vector<rational> optimalVector(Tableau const& _tableau);
 
 
-void printTableau(Tableau _tableau)
+/*
+ * void printTableau(Tableau _tableau)
 {
 	cout << "------------" << endl;
 	for (auto const& row: _tableau.data)
@@ -263,42 +265,6 @@ void printTableau(Tableau _tableau)
 	cout << "------------" << endl;
 	cout << "Solution: ";
 	printVector(optimalVector(_tableau));
-}
-
-
-string toString(SolvingState const& _state)
-{
-	string result;
-
-	for (Constraint const& constraint: _state.constraints)
-	{
-		vector<string> line;
-		for (auto&& [index, multiplier]: constraint.data | ranges::views::enumerate)
-			if (index > 0 && multiplier != 0)
-			{
-				string mult =
-					multiplier == -1 ?
-					"-" :
-					multiplier == 1 ?
-					"" :
-					toString(multiplier) + " ";
-				line.emplace_back(mult + _state.variableNames.at(index));
-			}
-		result += joinHumanReadable(line, " + ") + (constraint.equality ? "  = " : " <= ") + toString(constraint.data.front()) + "\n";
-	}
-	result += "Bounds:\n";
-	for (auto&& [index, bounds]: _state.bounds | ranges::view::enumerate)
-	{
-		if (!bounds[0] && !bounds[1])
-			continue;
-		if (bounds[0])
-			result += toString(*bounds[0]) + " <= ";
-		result += _state.variableNames.at(index);
-		if (bounds[1])
-			result += " <= " + toString(*bounds[1]);
-		result += "\n";
-	}
-	return result;
 }
 */
 
@@ -346,14 +312,6 @@ vector<rational> optimalVector(Tableau const& _tableau)
 	return result;
 }
 
-
-enum class LPResult
-{
-	Unknown,
-	Unbounded,
-	Feasible,
-	Infeasible
-};
 
 /// Solve the LP Ax = b s.t. min c^Tx
 /// The first row encodes the objective function
@@ -799,6 +757,89 @@ void normalizeRowLengths(SolvingState& _state)
 
 }
 
+bool Constraint::operator<(Constraint const& _other) const
+{
+	if (equality != _other.equality)
+		return equality < _other.equality;
+
+	for (size_t i = 0; i < max(data.size(), _other.data.size()); ++i)
+	{
+		 rational const& a = get(data, i);
+		 rational const& b = get(_other.data, i);
+		 if (a != b)
+			return a < b;
+	}
+	return false;
+}
+
+bool Constraint::operator==(Constraint const& _other) const
+{
+	if (equality != _other.equality)
+		return false;
+
+	for (size_t i = 0; i < max(data.size(), _other.data.size()); ++i)
+		 if (get(data, i) != get(_other.data, i))
+			return false;
+	return true;
+}
+
+bool SolvingState::operator<(SolvingState const& _other) const
+{
+	if (variableNames == _other.variableNames)
+	{
+		if (bounds == _other.bounds)
+			return constraints < _other.constraints;
+		else
+			return bounds < _other.bounds;
+	}
+	else
+		return variableNames < _other.variableNames;
+}
+
+bool SolvingState::operator==(SolvingState const& _other) const
+{
+	return
+		variableNames == _other.variableNames &&
+		bounds == _other.bounds &&
+		constraints == _other.constraints;
+}
+
+string SolvingState::toString() const
+{
+	string result;
+
+	for (Constraint const& constraint: constraints)
+	{
+		vector<string> line;
+		for (auto&& [index, multiplier]: constraint.data | ranges::views::enumerate)
+			if (index > 0 && multiplier != 0)
+			{
+				string mult =
+					multiplier == -1 ?
+					"-" :
+					multiplier == 1 ?
+					"" :
+					::toString(multiplier) + " ";
+				line.emplace_back(mult + variableNames.at(index));
+			}
+		result += joinHumanReadable(line, " + ") + (constraint.equality ? "  = " : " <= ") + ::toString(constraint.data.front()) + "\n";
+	}
+	result += "Bounds:\n";
+	for (auto&& [index, bounds]: bounds | ranges::view::enumerate)
+	{
+		if (!bounds[0] && !bounds[1])
+			continue;
+		if (bounds[0])
+			result += ::toString(*bounds[0]) + " <= ";
+		result += variableNames.at(index);
+		if (bounds[1])
+			result += " <= " + ::toString(*bounds[1]);
+		result += "\n";
+	}
+	return result;
+}
+
+
 void LPSolver::reset()
 {
 	m_state = vector<State>{{State{}}};
@@ -897,18 +938,32 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 		SolvingState split = splitProblem(state);
 		solAssert(!split.constraints.empty(), "");
 		solAssert(split.variableNames.size() >= 2, "");
+
 		//cout << "Split off:\n" << toString(split) << endl;
 		//cout << "----------------------------------------" << endl;
-		if (!boundsToConstraints(split))
-		{
-			//cout << "infeasible due to constraints" << endl;
-			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
-		}
 
 		LPResult lpResult;
 		vector<rational> solution;
-		//cout << "simplex query with " << split.variableNames.size() << " variables" << endl;
-		tie(lpResult, solution) = simplex(split.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(split.constraints.front().data.size() - 1, rational(bigint(1))));
+		auto it = m_cache.find(split);
+		if (it != m_cache.end())
+		{
+			cout << "Cache hit for" << endl;// << toString(split) << endl;
+			lpResult = it->second;
+		}
+		else
+		{
+			cout << "Cache miss" << endl;//it for" << endl;// << toString(split) << endl;
+			SolvingState orig = split;
+			if (!boundsToConstraints(split))
+				lpResult = LPResult::Infeasible;
+			else
+			{
+				//cout << "simplex query with " << split.variableNames.size() << " variables" << endl;
+				tie(lpResult, solution) = simplex(split.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(split.constraints.front().data.size() - 1, rational(bigint(1))));
+			}
+			m_cache.emplace(move(orig), lpResult);
+		}
+
 		switch (lpResult)
 		{
 		case LPResult::Feasible:
