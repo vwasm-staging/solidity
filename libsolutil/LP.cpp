@@ -156,6 +156,15 @@ optional<vector<rational>> vectorProduct(optional<vector<rational>> _x, optional
 	return *_x;
 }
 
+vector<bool>& operator|=(vector<bool>& _x, vector<bool> const& _y)
+{
+	solAssert(_x.size() == _y.size(), "");
+	for (size_t i = 0; i < _x.size(); ++i)
+		if (_y[i])
+			_x[i] = true;
+	return _x;
+}
+
 
 /**
  * Simplex tableau with the first row representing the objective function.
@@ -630,7 +639,7 @@ bool removeEmptyColumns(SolvingState& _state, map<string, rational>& _model, boo
 	return true;
 }
 
-auto nonZeroEntriesInColumn(SolvingState& _state, size_t _column)
+auto nonZeroEntriesInColumn(SolvingState const& _state, size_t _column)
 {
 	return
 		_state.constraints |
@@ -639,14 +648,14 @@ auto nonZeroEntriesInColumn(SolvingState& _state, size_t _column)
 		ranges::views::transform([](auto const& _entry) { return _entry.first; });
 }
 
-pair<vector<bool>, vector<bool>> firstConnectedComponent(SolvingState& _state)
+pair<vector<bool>, vector<bool>> connectedComponent(SolvingState const& _state, size_t _column)
 {
 	solAssert(_state.variableNames.size() >= 2, "");
 
 	vector<bool> includedColumns(_state.variableNames.size(), false);
 	vector<bool> includedRows(_state.constraints.size(), false);
 	stack<size_t> columnsToProcess;
-	columnsToProcess.push(1);
+	columnsToProcess.push(_column);
 	while (!columnsToProcess.empty())
 	{
 		size_t column = columnsToProcess.top();
@@ -668,51 +677,68 @@ pair<vector<bool>, vector<bool>> firstConnectedComponent(SolvingState& _state)
 	return make_pair(move(includedColumns), move(includedRows));
 }
 
-SolvingState splitProblem(SolvingState& _state)
+struct ProblemSplitter
 {
-	vector<bool> includedColumns;
-	vector<bool> includedRows;
-	tie(includedColumns, includedRows) = firstConnectedComponent(_state);
-	// "+ 1" because the constant column is included implicitly.
-	size_t columnCount = static_cast<size_t>(ranges::count_if(includedColumns, ranges::identity{})) + 1;
-	//cout << "Splitting off " << (columnCount - 1) << " of " << (_state.variableNames.size() - 1) << " variables." << endl;
-	SolvingState splitOff;
-	if (columnCount == _state.variableNames.size())
+	ProblemSplitter(SolvingState const& _state):
+		state(_state),
+		column(1),
+		seenColumns(vector<bool>(state.variableNames.size(), false))
+	{}
+
+	operator bool() const
 	{
-		splitOff = move(_state);
-		_state = SolvingState();
+		return column < state.variableNames.size();
 	}
-	else
+
+	SolvingState next()
 	{
+		vector<bool> includedColumns;
+		vector<bool> includedRows;
+		tie(includedColumns, includedRows) = connectedComponent(state, column);
+
+		// Update state.
+		seenColumns |= includedColumns;
+		++column;
+		while (column < state.variableNames.size() && seenColumns[column])
+			++column;
+
+		// Happens in case of not removed empty column.
+		// Currently not happening because those are removed during the simplification stage.
+		// TODO If this is the case, we should actually also check the bounds.
+		if (includedRows.empty())
+			return next();
+
+		SolvingState splitOff;
+
 		splitOff.variableNames.emplace_back();
 		splitOff.bounds.emplace_back();
 
-		set<size_t> variablesToRemove;
 		for (auto&& [i, included]: includedColumns | ranges::views::enumerate | ranges::views::tail)
 		{
 			if (!included)
 				continue;
-			variablesToRemove.insert(i);
-			splitOff.variableNames.emplace_back(move(_state.variableNames[i]));
-			splitOff.bounds.emplace_back(move(_state.bounds[i]));
+			splitOff.variableNames.emplace_back(move(state.variableNames[i]));
+			splitOff.bounds.emplace_back(move(state.bounds[i]));
 		}
-		set<size_t> rowsToRemove;
 		for (auto&& [i, included]: includedRows | ranges::views::enumerate)
 		{
 			if (!included)
 				continue;
-			rowsToRemove.insert(i);
-			Constraint splitRow{{}, _state.constraints[i].equality};
-			for (size_t j = 0; j < _state.constraints[i].data.size(); j++)
+			Constraint splitRow{{}, state.constraints[i].equality};
+			for (size_t j = 0; j < state.constraints[i].data.size(); j++)
 				if (j == 0 || includedColumns[j])
-					splitRow.data.push_back(_state.constraints[i].data[j]);
+					splitRow.data.push_back(state.constraints[i].data[j]);
 			splitOff.constraints.push_back(move(splitRow));
 		}
-		removeColumns(_state, variablesToRemove);
-		eraseIndices(_state.constraints, rowsToRemove);
+
+		return splitOff;
 	}
-	return splitOff;
-}
+
+	SolvingState const& state;
+	size_t column = 1;
+	vector<bool> seenColumns;
+};
+
 
 bool simplifySolvingState(SolvingState& _state, map<string, rational>& _model)
 {
@@ -933,9 +959,10 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	//cout << "----------------------------------------" << endl;
 
 	bool canOnlyBeUnknown = false;
-	while (!state.constraints.empty())
+	ProblemSplitter splitter(state);
+	while (splitter)
 	{
-		SolvingState split = splitProblem(state);
+		SolvingState split = splitter.next();
 		solAssert(!split.constraints.empty(), "");
 		solAssert(split.variableNames.size() >= 2, "");
 
@@ -947,12 +974,12 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 		auto it = m_cache.find(split);
 		if (it != m_cache.end())
 		{
-			cout << "Cache hit for" << endl;// << toString(split) << endl;
+			//cout << "Cache hit for" << endl;// << toString(split) << endl;
 			lpResult = it->second;
 		}
 		else
 		{
-			cout << "Cache miss" << endl;//it for" << endl;// << toString(split) << endl;
+			//cout << "Cache miss" << endl;//it for" << endl;// << toString(split) << endl;
 			SolvingState orig = split;
 			if (!boundsToConstraints(split))
 				lpResult = LPResult::Infeasible;
