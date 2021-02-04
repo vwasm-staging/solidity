@@ -524,6 +524,7 @@ void removeColumns(SolvingState& _state, set<size_t> const& _columnsToRemove)
 bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 {
 	// Turn constraints of the form ax <= b into an upper bound on x.
+	// TODO this could be a `vector<bool>`
 	set<size_t> constraintsToRemove;
 	for (auto const& [index, constraint]: _state.constraints | ranges::views::enumerate)
 	{
@@ -531,10 +532,12 @@ bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 			[](std::pair<size_t, rational> const& _x) { return !!_x.second; }
 		);
 		// TODO we can exit early on in the loop above.
-		if (ranges::distance(nonzero) > 1)
+		// TODO could also use iterators and exit if we can advance it twice.
+		auto numNonzero = ranges::distance(nonzero);
+		if (numNonzero > 1)
 			continue;
 		constraintsToRemove.insert(index);
-		if (ranges::distance(nonzero) == 0)
+		if (numNonzero == 0)
 		{
 			// 0 <= b or 0 = b
 			if (
@@ -571,11 +574,11 @@ bool extractDirectConstraints(SolvingState& _state, bool& _changed)
 
 bool removeFixedVariables(SolvingState& _state, map<string, rational>& _model, bool& _changed)
 {
-	set<size_t> variablesToRemove;
+	//set<size_t> variablesToRemove;
 	// Remove variables that have equal lower and upper bound.
 	for (auto const& [index, bounds]: _state.bounds | ranges::views::enumerate)
 	{
-		if (!bounds[1])
+		if (!bounds[1] || (!bounds[0] && bounds[1]->numerator() > 0))
 			continue;
 		// Lower bound must be at least zero.
 		rational lower = max(rational{}, bounds[0] ? *bounds[0] : rational{});
@@ -585,7 +588,9 @@ bool removeFixedVariables(SolvingState& _state, map<string, rational>& _model, b
 		if (upper != lower)
 			continue;
 		_model[_state.variableNames.at(index)] = lower;
-		variablesToRemove.insert(index);
+		//variablesToRemove.insert(index);
+		_state.bounds[index] = {};
+		_changed = true;
 		////cout << "Removing variable " << _state.variableNames[index] << endl;
 
 		// substitute variable
@@ -597,11 +602,11 @@ bool removeFixedVariables(SolvingState& _state, map<string, rational>& _model, b
 			}
 	}
 
-	if (!variablesToRemove.empty())
+/*	if (!variablesToRemove.empty())
 	{
 		_changed = true;
-		removeColumns(_state, variablesToRemove);
-	}
+		//removeColumns(_state, variablesToRemove);
+	}*/
 	return true;
 }
 
@@ -753,6 +758,9 @@ bool simplifySolvingState(SolvingState& _state, map<string, rational>& _model)
 	while (changed)
 	{
 		changed = false;
+
+		if (!removeFixedVariables(_state, _model, changed))
+			return false;
 
 		if (!extractDirectConstraints(_state, changed))
 			return false;
