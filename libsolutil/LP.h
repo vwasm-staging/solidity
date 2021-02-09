@@ -51,13 +51,33 @@ struct SolvingState
 	std::string toString() const;
 };
 
+/// A literal of a (potentially negated) boolean variable or an inactive constraint.
+struct Literal
+{
+	enum { PositiveVariable, NegativeVariable, Constraint } kind;
+	// Either points to a boolean variable or to an constraint.
+	size_t index{0};
+};
+
+struct Clause
+{
+	std::vector<Literal> literals;
+};
+
 
 struct State
 {
 	bool infeasible = false;
 	std::map<std::string, size_t> variables;
-	std::vector<Constraint> constraints;
+	// TODO we ignore this for now, all variables that are used in boolean context
+	// are treated as boolean
+	//std::vector<bool> isBooleanVariable;
+	// Potential constraints, referenced through clauses
+	std::map<size_t, Constraint> constraints;
+	// Unconditional bounds on variables
 	std::map<size_t, std::array<std::optional<boost::rational<bigint>>, 2>> bounds;
+
+	std::vector<Clause> clauses;
 };
 
 enum class LPResult
@@ -68,8 +88,18 @@ enum class LPResult
 	Infeasible
 };
 
+class LPSolver
+{
+public:
+	std::pair<smtutil::CheckResult, std::vector<std::string>>
+	check(SolvingState _state, std::vector<smtutil::Expression> const& _expressionsToEvaluate);
 
-class LPSolver: public smtutil::SolverInterface
+private:
+	std::map<SolvingState, LPResult> m_cache;
+};
+
+
+class BooleanLPSolver: public smtutil::SolverInterface
 {
 public:
 	void reset();
@@ -83,8 +113,13 @@ public:
 	std::pair<smtutil::CheckResult, std::vector<std::string>>
 	check(std::vector<smtutil::Expression> const& _expressionsToEvaluate) override;
 
+	std::string toString() const;
+
 private:
 	using rational = boost::rational<bigint>;
+
+	std::optional<Literal> parseLiteral(smtutil::Expression const& _expr);
+	std::optional<Literal> negate(Literal const& _lit);
 
 	/// Parses the expression and expects a linear sum of variables.
 	/// Returns a vector with the first element being the constant and the
@@ -99,10 +134,15 @@ private:
 	void addUpperBound(size_t _index, rational _value);
 	void addLowerBound(size_t _index, rational _value);
 
+	size_t addConstraint(Constraint _constraint);
+
+	Constraint const& constraint(size_t _index) const;
+
 	std::string variableName(size_t _index) const;
 
+	size_t m_constraintCounter = 0;
 	std::vector<State> m_state{{State{}}};
-	std::map<SolvingState, LPResult> m_cache;
+	LPSolver m_lpSolver;
 };
 
 

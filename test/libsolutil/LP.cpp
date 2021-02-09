@@ -34,7 +34,7 @@ namespace solidity::util::test
 class LPTestFramework
 {
 protected:
-	LPSolver solver;
+	BooleanLPSolver solver;
 
 	Expression variable(string const& _name)
 	{
@@ -244,7 +244,6 @@ BOOST_AUTO_TEST_CASE(splittable)
 	solver.addAssertion(z >= 3);
 	feasible({{x, "0"}, {y, "3"}, {z, "4"}, {w, "24"}});
 }
-
 
 BOOST_AUTO_TEST_SUITE_END()
 

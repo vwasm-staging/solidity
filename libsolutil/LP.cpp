@@ -874,12 +874,12 @@ string SolvingState::toString() const
 }
 
 
-void LPSolver::reset()
+void BooleanLPSolver::reset()
 {
 	m_state = vector<State>{{State{}}};
 }
 
-void LPSolver::push()
+void BooleanLPSolver::push()
 {
 	if (m_state.back().infeasible)
 	{
@@ -894,13 +894,13 @@ void LPSolver::push()
 	m_state.back().bounds = move(bounds);
 }
 
-void LPSolver::pop()
+void BooleanLPSolver::pop()
 {
 	m_state.pop_back();
 	solAssert(!m_state.empty(), "");
 }
 
-void LPSolver::declareVariable(string const& _name, SortPointer const& _sort)
+void BooleanLPSolver::declareVariable(string const& _name, SortPointer const& _sort)
 {
 	// TODO This will not be an integer variable in our model.
 	// Introduce a new kind?
@@ -910,12 +910,58 @@ void LPSolver::declareVariable(string const& _name, SortPointer const& _sort)
 	m_state.back().variables[_name] = index;
 }
 
-void LPSolver::addAssertion(Expression const& _expr)
+void BooleanLPSolver::addAssertion(Expression const& _expr)
 {
-	if (_expr.name == "and")
+	if (_expr.arguments.empty())
+		m_state.back().clauses.emplace_back(Clause{vector<Literal>{*parseLiteral(_expr)}});
+	else if (_expr.name == "=")
+	{
+		// Try to see if both sides are linear.
+		// Problem: If we have `a = b` for boolean variables.
+		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
+		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
+		if (left && right)
+		{
+			vector<rational> data = *left - *right;
+			data[0] *= -1;
+			Constraint c{move(data), _expr.name == "="};
+			if (!tryAddDirectBounds(c))
+			{
+				size_t index = addConstraint(move(c));
+				m_state.back().clauses.emplace_back(Clause{vector<Literal>{Literal{Literal::Constraint, index}}});
+			}
+		}
+		else
+		{
+			// TODO can also be literal true/false!
+			// TODO we could even try to parse a full clause here
+			// If we don't, then a = or(x, y) does not work.
+			optional<Literal> left = parseLiteral(_expr.arguments.at(0));
+			optional<Literal> right = parseLiteral(_expr.arguments.at(1));
+			if (left && right)
+			{
+				// a = b <=> (-a \/ b) /\ (a \/ -b)
+				optional<Literal> negLeft = negate(*left);
+				optional<Literal> negRight = negate(*right);
+				if (!negLeft || !negRight)
+					return;
+				m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negLeft, *right}});
+				m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *negRight}});
+			}
+		}
+	}
+	else if (_expr.name == "and")
 	{
 		addAssertion(_expr.arguments.at(0));
 		addAssertion(_expr.arguments.at(1));
+	}
+	else if (_expr.name == "or")
+	{
+		// TODO we could even try to parse a full clause here
+		optional<Literal> left = parseLiteral(_expr.arguments.at(0));
+		optional<Literal> right = parseLiteral(_expr.arguments.at(1));
+		if (left && right)
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *right}});
 	}
 	else if (_expr.name == "<=" || _expr.name == "=")
 	{
@@ -928,7 +974,10 @@ void LPSolver::addAssertion(Expression const& _expr)
 		data[0] *= -1;
 		Constraint c{move(data), _expr.name == "="};
 		if (!tryAddDirectBounds(c))
-			m_state.back().constraints.push_back(move(c));
+		{
+			size_t index = addConstraint(move(c));
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{Literal{Literal::Constraint, index}}});
+		}
 	}
 	else if (_expr.name == ">=")
 		addAssertion(_expr.arguments.at(1) <= _expr.arguments.at(0));
@@ -938,19 +987,50 @@ void LPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 }
 
-pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _expressionsToEvaluate)
+namespace
 {
-	if (m_state.back().infeasible)
-		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+// TODO do this without recursion
+template <class T>
+bool iterateCombinations(set<size_t> _variables, map<size_t, bool> _values, T _callback)
+{
+	if (_variables.empty())
+		return _callback(_values);
+	else
+	{
+		size_t index = *_variables.begin();
+		_variables.erase(index);
+		_values[index] = false;
+		if (!iterateCombinations(_variables, _values, _callback))
+			return false;
+		_values[index] = true;
+		_callback(_values);
+		return iterateCombinations(move(_variables), move(_values), _callback);
+	}
+}
 
-	SolvingState state;
-	for (auto&& [name, index]: m_state.back().variables)
-		resizeAndSet(state.variableNames, index, name);
-	for (auto&& [index, value]: m_state.back().bounds)
-		resizeAndSet(state.bounds, index, value);
-	for (State const& s: m_state)
-		for (Constraint const& constraint: s.constraints)
-			state.constraints.push_back(constraint);
+/// @returns nullopt if the assignment satisfies the clause.
+/// @returns 0 if the clause cannot be satisfied
+/// @returns index of a constraint if the constraint can satisfy the clause (and only it)
+optional<size_t> clauseSatisfied(Clause const& _clause, map<size_t, bool> const& _values)
+{
+	size_t constraint = 0;
+	for (Literal const& l: _clause.literals)
+		if (
+			(l.kind == Literal::PositiveVariable && _values.at(l.index)) ||
+			(l.kind == Literal::NegativeVariable && !_values.at(l.index))
+		)
+			return nullopt;
+		else if (l.kind == Literal::Constraint)
+			// TODO assert it is the onyl one
+			constraint = l.index;
+	return constraint;
+}
+
+}
+
+pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Expression> const& _expressionsToEvaluate)
+{
+	SolvingState state = move(_state);
 	normalizeRowLengths(state);
 
 	//cout << endl;
@@ -1041,7 +1121,177 @@ pair<CheckResult, vector<string>> LPSolver::check(vector<Expression> const& _exp
 	return make_pair(CheckResult::SATISFIABLE, move(requestedModel));
 }
 
-optional<vector<rational>> LPSolver::parseLinearSum(smtutil::Expression const& _expr) const
+
+pair<CheckResult, vector<string>> BooleanLPSolver::check(vector<Expression> const& _expressionsToEvaluate)
+{
+	cout << "Solving boolean constraint system" << endl;
+	cout << toString() << endl;
+
+	if (m_state.back().infeasible)
+		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+
+	SolvingState state;
+	for (auto&& [name, index]: m_state.back().variables)
+		resizeAndSet(state.variableNames, index, name);
+	for (auto&& [index, value]: m_state.back().bounds)
+		resizeAndSet(state.bounds, index, value);
+
+	// TODO try to simplify the clauses
+
+	// TODO this assumes that there is at most one constraint per clause.
+
+	set<size_t> booleanVariables;
+
+	for (State const& s: m_state)
+		for (Clause const& clause: s.clauses)
+			for (Literal const& l: clause.literals)
+				if (l.kind != Literal::Constraint)
+					booleanVariables.insert(l.index);
+
+
+	cout << "Solving problem with " << booleanVariables.size() << " Boolean variables" << endl;
+
+	bool foundSatisfiable = false;
+	iterateCombinations(booleanVariables, map<size_t, bool>{}, [&](map<size_t, bool> const& _values) {
+		state.constraints.clear();
+
+		for (State const& s: m_state)
+			for (Clause const& clause: s.clauses)
+			{
+				optional<size_t> constraintIndex = clauseSatisfied(clause, _values);
+				if (constraintIndex == nullopt)
+					continue;
+				else if (*constraintIndex == 0)
+					return true;
+				else
+					state.constraints.push_back(constraint(*constraintIndex));
+			}
+		auto result = m_lpSolver.check(state, _expressionsToEvaluate);
+		if (result.first != CheckResult::UNSATISFIABLE)
+		{
+			foundSatisfiable = true;
+			return false;
+		}
+		return true;
+	});
+	if (foundSatisfiable)
+		return make_pair(CheckResult::UNKNOWN, vector<string>{});
+	else
+		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+}
+
+string BooleanLPSolver::toString() const
+{
+	string result;
+
+	for (State const& s: m_state)
+		for (Clause const& c: s.clauses)
+		{
+			vector<string> literals;
+			for (Literal const& l: c.literals)
+				if (l.kind == Literal::Constraint)
+				{
+					Constraint const& constr = constraint(l.index);
+					vector<string> line;
+					for (auto&& [index, multiplier]: constr.data | ranges::views::enumerate)
+						if (index > 0 && multiplier != 0)
+						{
+							string mult =
+								multiplier == -1 ?
+								"-" :
+								multiplier == 1 ?
+								"" :
+								::toString(multiplier) + " ";
+							line.emplace_back(mult + variableName(index));
+						}
+					literals.emplace_back(joinHumanReadable(line, " + ") + (constr.equality ? "  = " : " <= ") + ::toString(constr.data.front()));
+				}
+				else
+					literals.emplace_back((l.kind == Literal::NegativeVariable ? "~ " : "") + variableName(l.index));
+			result += joinHumanReadable(literals, "  \\/  ") + "\n";
+		}
+	result += "-- Bounds:\n";
+	for (State const& s: m_state)
+		for (auto&& [index, bounds]: s.bounds)
+		{
+			if (!bounds[0] && !bounds[1])
+				continue;
+			if (bounds[0])
+				result += ::toString(*bounds[0]) + " <= ";
+			result += variableName(index);
+			if (bounds[1])
+				result += " <= " + ::toString(*bounds[1]);
+			result += "\n";
+		}
+	return result;
+}
+
+optional<Literal> BooleanLPSolver::parseLiteral(smtutil::Expression const& _expr)
+{
+	// TODO constanst
+	if (_expr.arguments.empty())
+		return Literal{
+			Literal::PositiveVariable,
+			m_state.back().variables.at(_expr.name)
+		};
+	else if (_expr.name == "not")
+	{
+		if (optional<Literal> inner = parseLiteral(_expr.arguments.at(1)))
+			return negate(move(*inner));
+	}
+	else if (_expr.name == "<=" || _expr.name == "=")
+	{
+		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
+		optional<vector<rational>> right = parseLinearSum(_expr.arguments.at(1));
+		if (!left || !right)
+			return {};
+
+		vector<rational> data = *left - *right;
+		data[0] *= -1;
+
+		return Literal{Literal::Constraint, addConstraint(Constraint{move(data), _expr.name == "="})};
+	}
+	else if (_expr.name == ">=")
+		return parseLiteral(_expr.arguments.at(1) <= _expr.arguments.at(0));
+	else if (_expr.name == "<")
+		return parseLiteral(_expr.arguments.at(0) <= _expr.arguments.at(1) - 1);
+	else if (_expr.name == ">")
+		return parseLiteral(_expr.arguments.at(1) < _expr.arguments.at(0));
+
+	return {};
+}
+
+optional<Literal> BooleanLPSolver::negate(Literal const& _lit)
+{
+	switch (_lit.kind)
+	{
+	case Literal::NegativeVariable:
+		return Literal{Literal::PositiveVariable, _lit.index};
+	case Literal::PositiveVariable:
+		return Literal{Literal::NegativeVariable, _lit.index};
+	default:
+		break;
+	}
+
+	// TODO does not have to live in the same push context.
+	Constraint const& c = m_state.back().constraints.at(_lit.index);
+
+	// TODO We can solve 'not equal' by introducing a new boolean
+	if (c.equality)
+		return {};
+
+	// X > b
+	// -x < -b
+	// -x <= -b - 1
+
+	Constraint negated = c;
+	negated.data *= -1;
+	negated.data[0] -= 1;
+
+	return Literal{Literal::Constraint, addConstraint(move(negated))};
+}
+
+optional<vector<rational>> BooleanLPSolver::parseLinearSum(smtutil::Expression const& _expr) const
 {
 	if (_expr.arguments.empty() || _expr.name == "*")
 		return parseProduct(_expr);
@@ -1057,7 +1307,7 @@ optional<vector<rational>> LPSolver::parseLinearSum(smtutil::Expression const& _
 		return std::nullopt;
 }
 
-optional<vector<rational>> LPSolver::parseProduct(smtutil::Expression const& _expr) const
+optional<vector<rational>> BooleanLPSolver::parseProduct(smtutil::Expression const& _expr) const
 {
 	if (_expr.arguments.empty())
 		return parseFactor(_expr);
@@ -1068,7 +1318,7 @@ optional<vector<rational>> LPSolver::parseProduct(smtutil::Expression const& _ex
 		return std::nullopt;
 }
 
-optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _expr) const
+optional<vector<rational>> BooleanLPSolver::parseFactor(smtutil::Expression const& _expr) const
 {
 	solAssert(_expr.arguments.empty(), "");
 	solAssert(!_expr.name.empty(), "");
@@ -1084,7 +1334,7 @@ optional<vector<rational>> LPSolver::parseFactor(smtutil::Expression const& _exp
 	return factorForVariable(index, rational(bigint(1)));
 }
 
-bool LPSolver::tryAddDirectBounds(Constraint const& _constraint)
+bool BooleanLPSolver::tryAddDirectBounds(Constraint const& _constraint)
 {
 	auto nonzero = _constraint.data | ranges::views::enumerate | ranges::views::tail | ranges::view::filter(
 		[](std::pair<size_t, rational> const& _x) { return !!_x.second; }
@@ -1119,14 +1369,14 @@ bool LPSolver::tryAddDirectBounds(Constraint const& _constraint)
 	return true;
 }
 
-void LPSolver::addUpperBound(size_t _index, rational _value)
+void BooleanLPSolver::addUpperBound(size_t _index, rational _value)
 {
 	//cout << "adding " << variableName(_index) << " <= " << toString(_value) << endl;
 	if (!m_state.back().bounds[_index][1] || _value < *m_state.back().bounds[_index][1])
 		m_state.back().bounds[_index][1] = move(_value);
 }
 
-void LPSolver::addLowerBound(size_t _index, rational _value)
+void BooleanLPSolver::addLowerBound(size_t _index, rational _value)
 {
 	// Lower bound must be at least zero.
 	_value = max(_value, rational{});
@@ -1135,8 +1385,23 @@ void LPSolver::addLowerBound(size_t _index, rational _value)
 		m_state.back().bounds[_index][0] = move(_value);
 }
 
+size_t BooleanLPSolver::addConstraint(Constraint _constraint)
+{
+	size_t index = ++m_constraintCounter;
+	m_state.back().constraints[index] = move(_constraint);
+	return index;
+}
 
-string LPSolver::variableName(size_t _index) const
+Constraint const& BooleanLPSolver::constraint(size_t _index) const
+{
+	for (State const& state: m_state)
+		if (state.constraints.count(_index))
+			return state.constraints.at(_index);
+	solAssert(false, "");
+}
+
+
+string BooleanLPSolver::variableName(size_t _index) const
 {
 	for (auto const& v: m_state.back().variables)
 		if (v.second == _index)

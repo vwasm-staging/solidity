@@ -63,6 +63,7 @@ void ReasoningBasedSimplifier::operator()(VariableDeclaration& _varDecl)
 	YulString varName = _varDecl.variables.front().name;
 	if (!m_ssaVariables.count(varName))
 		return;
+	// TODO should be boolean depending on th efunction
 	smtutil::Expression variable = newRestrictedVariable("yul_" + varName.str());
 	bool const inserted = m_variables.insert({varName, variable}).second;
 	yulAssert(inserted, "");
@@ -153,7 +154,7 @@ ReasoningBasedSimplifier::ReasoningBasedSimplifier(
 ):
 	m_dialect(_dialect),
 	m_ssaVariables(_ssaVariables),
-	m_solver(make_unique<util::LPSolver>())
+	m_solver(make_unique<util::BooleanLPSolver>())
 {
 }
 
