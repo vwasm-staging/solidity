@@ -1021,8 +1021,10 @@ optional<size_t> clauseSatisfied(Clause const& _clause, map<size_t, bool> const&
 		)
 			return nullopt;
 		else if (l.kind == Literal::Constraint)
-			// TODO assert it is the onyl one
+		{
+			solAssert(constraint == 0, "More than one constraint per clause not supported.");
 			constraint = l.index;
+		}
 	return constraint;
 }
 
@@ -1175,9 +1177,15 @@ pair<CheckResult, vector<string>> BooleanLPSolver::check(vector<Expression> cons
 		return true;
 	});
 	if (foundSatisfiable)
+	{
+		cout << "Satisfiable" << endl;
 		return make_pair(CheckResult::UNKNOWN, vector<string>{});
+	}
 	else
+	{
+		cout << "Infeasible" << endl;
 		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+	}
 }
 
 string BooleanLPSolver::toString() const

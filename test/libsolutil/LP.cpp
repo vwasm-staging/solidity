@@ -245,6 +245,24 @@ BOOST_AUTO_TEST_CASE(splittable)
 	feasible({{x, "0"}, {y, "3"}, {z, "4"}, {w, "24"}});
 }
 
+BOOST_AUTO_TEST_CASE(boolean)
+{
+	Expression x = variable("x");
+	Expression y = variable("y");
+	Expression z = variable("z");
+	solver.addAssertion(x <= 5);
+	solver.addAssertion(y <= 2);
+	solver.push();
+	solver.addAssertion(x < y && x > y);
+	infeasible();
+	solver.pop();
+	Expression w = variable("w");
+	solver.addAssertion(w == (x < y));
+	solver.addAssertion(w || x > y);
+	feasible({{x, "0"}, {y, "3"}, {z, "2"}, {w, "26"}});
+}
+
+
 BOOST_AUTO_TEST_SUITE_END()
 
 }
