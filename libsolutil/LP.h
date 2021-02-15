@@ -55,7 +55,7 @@ struct SolvingState
 struct Literal
 {
 	enum { PositiveVariable, NegativeVariable, Constraint } kind;
-	// Either points to a boolean variable or to an constraint.
+	// Either points to a boolean variable or to a constraint.
 	size_t index{0};
 };
 
@@ -69,9 +69,7 @@ struct State
 {
 	bool infeasible = false;
 	std::map<std::string, size_t> variables;
-	// TODO we ignore this for now, all variables that are used in boolean context
-	// are treated as boolean
-	//std::vector<bool> isBooleanVariable;
+	std::vector<bool> isBooleanVariable;
 	// Potential constraints, referenced through clauses
 	std::map<size_t, Constraint> constraints;
 	// Unconditional bounds on variables
@@ -118,6 +116,8 @@ public:
 private:
 	using rational = boost::rational<bigint>;
 
+	void declareVariable(std::string const& _name, bool _boolean);
+
 	std::optional<Literal> parseLiteral(smtutil::Expression const& _expr);
 	std::optional<Literal> negate(Literal const& _lit);
 
@@ -140,7 +140,11 @@ private:
 
 	std::string variableName(size_t _index) const;
 
+	bool isBooleanVariable(std::string const& _name) const;
+	bool isBooleanVariable(size_t _index) const;
+
 	size_t m_constraintCounter = 0;
+	size_t m_internalVariableCounte = 0;
 	std::vector<State> m_state{{State{}}};
 	LPSolver m_lpSolver;
 };

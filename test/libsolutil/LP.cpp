@@ -41,6 +41,11 @@ protected:
 		return solver.newVariable(_name, smtutil::SortProvider::sintSort);
 	}
 
+	Expression booleanVariable(string const& _name)
+	{
+		return solver.newVariable(_name, smtutil::SortProvider::boolSort);
+	}
+
 	void feasible(vector<pair<Expression, string>> const& _solution)
 	{
 		vector<Expression> variables;
@@ -256,10 +261,47 @@ BOOST_AUTO_TEST_CASE(boolean)
 	solver.addAssertion(x < y && x > y);
 	infeasible();
 	solver.pop();
-	Expression w = variable("w");
+	Expression w = booleanVariable("w");
 	solver.addAssertion(w == (x < y));
 	solver.addAssertion(w || x > y);
 	feasible({{x, "0"}, {y, "3"}, {z, "2"}, {w, "26"}});
+}
+
+BOOST_AUTO_TEST_CASE(boolean_complex)
+{
+	Expression x = variable("x");
+	Expression y = variable("y");
+	Expression a = booleanVariable("a");
+	Expression b = booleanVariable("b");
+	solver.addAssertion(x <= 5);
+	solver.addAssertion(y <= 2);
+	solver.addAssertion(a == (x >= 2));
+	solver.addAssertion(a || b);
+	solver.addAssertion(b == !a);
+	solver.addAssertion(b == (x < 2));
+	feasible({{x, "0"}, {y, "3"}});
+	solver.addAssertion(a && b);
+	infeasible();
+}
+
+
+BOOST_AUTO_TEST_CASE(pure_boolean)
+{
+	Expression a = booleanVariable("a");
+	Expression b = booleanVariable("b");
+	Expression c = booleanVariable("c");
+	Expression d = booleanVariable("d");
+	Expression e = booleanVariable("e");
+	Expression f = booleanVariable("f");
+	solver.addAssertion(a && !b);
+	solver.addAssertion(b || c);
+	solver.addAssertion(c == (d || c));
+	solver.addAssertion(f == (b && !c));
+	solver.addAssertion(!f || e);
+	solver.addAssertion(c || d);
+	feasible({});
+	solver.addAssertion(a && b);
+	infeasible();
 }
 
 
