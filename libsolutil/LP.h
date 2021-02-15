@@ -96,6 +96,21 @@ private:
 	std::map<SolvingState, LPResult> m_cache;
 };
 
+struct DPLL
+{
+	/// Try to simplify the set of clauses without branching.
+	/// @returns false if the set of clauses is unsatisfiable (without considering the constraints).
+	bool simplify();
+	size_t findUnassignedVariable() const;
+	bool setVariable(size_t _index, bool _value);
+	/// Sets variables and removes clauses or literals from clauses.
+	/// @returns false if the clauses are unsatisfiable.
+	bool setVariables(std::map<size_t, bool> const& _assignments, bool _removeSingleConstraintClauses = false);
+
+	std::vector<Clause> clauses;
+	std::vector<size_t> constraints;
+};
+
 
 class BooleanLPSolver: public smtutil::SolverInterface
 {
@@ -135,6 +150,11 @@ private:
 	void addLowerBound(size_t _index, rational _value);
 
 	size_t addConstraint(Constraint _constraint);
+
+	smtutil::CheckResult runDPLL(SolvingState& _solvingState, DPLL _dpll);
+	std::string toString(DPLL const& _dpll) const;
+	std::string toString(std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> const& _bounds) const;
+	std::string toString(Clause const& _clause) const;
 
 	Constraint const& constraint(size_t _index) const;
 

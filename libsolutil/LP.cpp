@@ -874,6 +874,84 @@ string SolvingState::toString() const
 }
 
 
+bool DPLL::simplify()
+{
+	while (!clauses.empty() && !ranges::all_of(clauses, [](Clause const& _c) { return _c.literals.size() > 1; }))
+	{
+		map<size_t, bool> assignments;
+
+		// TODO this assumes that no clause contains more than one constraint
+
+		for (Clause const& c: clauses)
+			if (c.literals.empty())
+				return false;
+			else if (c.literals.size() == 1)
+			{
+				Literal const& literal = c.literals.front();
+				if (literal.kind == Literal::Constraint)
+					constraints.push_back(literal.index);
+				else
+				{
+					bool value = literal.kind == Literal::PositiveVariable ? true : false;
+					if (assignments.count(literal.index) && assignments.at(literal.index) != value)
+						return false;
+					//cout << "Assigning" << variableName(literal.index) << " " << value << endl;
+					assignments[literal.index] = value;
+				}
+			}
+
+		if (!setVariables(assignments,  true))
+			return false;
+	}
+	return true;
+}
+
+size_t DPLL::findUnassignedVariable() const
+{
+	for (Clause const& c: clauses)
+		for (Literal const& l: c.literals)
+			if (l.kind != Literal::Constraint)
+				return l.index;
+	solAssert(false, "");
+	return 0;
+}
+
+bool DPLL::setVariable(size_t _index, bool _value)
+{
+	return setVariables({{_index, _value}});
+}
+
+bool DPLL::setVariables(map<size_t, bool> const& _assignments, bool _removeSingleConstraintClauses)
+{
+	// TODO do this in a way so that we do not have to copy twice.
+	vector<Clause> prunedClauses;
+	for (Clause const& c: clauses)
+	{
+		bool skipClause = false;
+		vector<Literal> newClause;
+		if (_removeSingleConstraintClauses && c.literals.size() == 1 && c.literals.front().kind == Literal::Constraint)
+			continue;
+		for (Literal const& l: c.literals)
+			if (l.kind != Literal::Constraint && _assignments.count(l.index))
+			{
+				if (_assignments.at(l.index) == (l.kind == Literal::PositiveVariable))
+				{
+					skipClause = true;
+					break;
+				}
+			}
+			else
+				newClause.push_back(l);
+		if (skipClause)
+			continue;
+		if (newClause.empty())
+			return false;
+		prunedClauses.push_back(Clause{move(newClause)});
+	}
+	clauses = move(prunedClauses);
+	return true;
+}
+
 void BooleanLPSolver::reset()
 {
 	m_state = vector<State>{{State{}}};
@@ -1029,48 +1107,6 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 }
 
-namespace
-{
-// TODO do this without recursion
-template <class T>
-bool iterateCombinations(set<size_t> _variables, map<size_t, bool> _values, T _callback)
-{
-	if (_variables.empty())
-		return _callback(_values);
-	else
-	{
-		size_t index = *_variables.begin();
-		_variables.erase(index);
-		_values[index] = false;
-		if (!iterateCombinations(_variables, _values, _callback))
-			return false;
-		_values[index] = true;
-		return iterateCombinations(move(_variables), move(_values), _callback);
-	}
-}
-
-/// @returns nullopt if the assignment satisfies the clause.
-/// @returns 0 if the clause cannot be satisfied
-/// @returns index of a constraint if the constraint can satisfy the clause (and only it)
-optional<size_t> clauseSatisfied(Clause const& _clause, map<size_t, bool> const& _values)
-{
-	size_t constraint = 0;
-	for (Literal const& l: _clause.literals)
-		if (
-			(l.kind == Literal::PositiveVariable && _values.at(l.index)) ||
-			(l.kind == Literal::NegativeVariable && !_values.at(l.index))
-		)
-			return nullopt;
-		else if (l.kind == Literal::Constraint)
-		{
-			solAssert(constraint == 0, "More than one constraint per clause not supported.");
-			constraint = l.index;
-		}
-	return constraint;
-}
-
-}
-
 pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Expression> const& _expressionsToEvaluate)
 {
 	SolvingState state = move(_state);
@@ -1180,83 +1216,13 @@ pair<CheckResult, vector<string>> BooleanLPSolver::check(vector<Expression> cons
 	for (auto&& [index, value]: m_state.back().bounds)
 		resizeAndSet(state.bounds, index, value);
 
-	// TODO try to simplify the clauses
-
-	// TODO this assumes that there is at most one constraint per clause.
-
-	set<size_t> booleanVariables;
-
+	std::vector<Clause> clauses;
 	for (State const& s: m_state)
 		for (Clause const& clause: s.clauses)
-			for (Literal const& l: clause.literals)
-				if (l.kind != Literal::Constraint)
-					booleanVariables.insert(l.index);
-	for (auto&& [index, isBool]: m_state.back().isBooleanVariable | ranges::views::enumerate)
-		if (isBool)
-			booleanVariables.insert(index);
+			clauses.push_back(clause);
 
-	cout << "Solving problem with " << booleanVariables.size() << " Boolean variables" << endl;
-
-	// TODO could try to check for infeasibility already only on the clauses that do not contain
-	// any boolean variable.
-
-	bool foundSatisfiable = false;
-	iterateCombinations(booleanVariables, map<size_t, bool>{}, [&](map<size_t, bool> const& _values) {
-		state.constraints.clear();
-
-		for (State const& s: m_state)
-			for (Clause const& clause: s.clauses)
-			{
-				optional<size_t> constraintIndex = clauseSatisfied(clause, _values);
-				if (constraintIndex == nullopt)
-					continue;
-				else if (*constraintIndex == 0)
-					return true;
-				else
-					state.constraints.push_back(constraint(*constraintIndex));
-			}
-		// go through equalities `a = b && c` `a = b || c`, `a = ~(c)`
-		// for each boolean variable, we can evaluate it.
-		// for a constraint, we either add it positively or negatively.
-		// what about negated equality constraints?
-		// c = (x = y) -> c = a1 && a2, a1 = (x <= y), a2 = (x >= y), c -> (x = y) (just to help with equality in LP)
-
-		// plan of attack:
-		// - distinguish boolean variables from non-boolean
-		// - parse all assertions into CNF i.e. clauses.
-		// - only add equality constraints if they can never be negated.
-		// - run DPLL: clauses with just a literal assigns that literal.
-		//             each assignment to a literal removes that variable everywhere
-		//       if there are only more complex clauses left, try both values for the boolean variabel.
-
-		// - add map of equalities for boolean variables: either or/and/neg of two other boolean variables or equal to a constraint
-		// - those constraints cannot be equality constraints so that they can be negated.
-		// - add map of booleans implying constraints - those can still be equality constraints.
-		// - freely introduce new boolean variables internally if needed.
-		// - iterate through all combinations of boolean assignments. If there is a conflict, it should be noticed quickly.
-		//
-
-		auto result = m_lpSolver.check(state, _expressionsToEvaluate);
-		if (result.first != CheckResult::UNSATISFIABLE)
-		{
-			cout << "Boolean model: " << endl;
-			for (auto const& [var, value]: _values)
-				cout << variableName(var) << ": " << value << endl;
-			foundSatisfiable = true;
-			return false;
-		}
-		return true;
-	});
-	if (foundSatisfiable)
-	{
-		cout << "Satisfiable" << endl;
-		return make_pair(CheckResult::UNKNOWN, vector<string>{});
-	}
-	else
-	{
-		cout << "Infeasible" << endl;
-		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
-	}
+	(void)_expressionsToEvaluate;
+	return {runDPLL(state, DPLL{move(clauses), {}}), {}};
 }
 
 string BooleanLPSolver::toString() const
@@ -1265,30 +1231,7 @@ string BooleanLPSolver::toString() const
 
 	for (State const& s: m_state)
 		for (Clause const& c: s.clauses)
-		{
-			vector<string> literals;
-			for (Literal const& l: c.literals)
-				if (l.kind == Literal::Constraint)
-				{
-					Constraint const& constr = constraint(l.index);
-					vector<string> line;
-					for (auto&& [index, multiplier]: constr.data | ranges::views::enumerate)
-						if (index > 0 && multiplier != 0)
-						{
-							string mult =
-								multiplier == -1 ?
-								"-" :
-								multiplier == 1 ?
-								"" :
-								::toString(multiplier) + " ";
-							line.emplace_back(mult + variableName(index));
-						}
-					literals.emplace_back(joinHumanReadable(line, " + ") + (constr.equality ? "  = " : " <= ") + ::toString(constr.data.front()));
-				}
-				else
-					literals.emplace_back((l.kind == Literal::NegativeVariable ? "!" : "") + variableName(l.index));
-			result += joinHumanReadable(literals, "  \\/  ") + "\n";
-		}
+			result += toString(c);
 	result += "-- Bounds:\n";
 	for (State const& s: m_state)
 		for (auto&& [index, bounds]: s.bounds)
@@ -1481,6 +1424,99 @@ size_t BooleanLPSolver::addConstraint(Constraint _constraint)
 	size_t index = ++m_constraintCounter;
 	m_state.back().constraints[index] = move(_constraint);
 	return index;
+}
+
+// TODO not the full solving state, only the bounds
+CheckResult BooleanLPSolver::runDPLL(SolvingState& _solvingState, DPLL _dpll)
+{
+	cout << "Running dpll on" << endl << toString(_solvingState.bounds) << "\n--bool--\n" << toString(_dpll) << endl;
+	if (!_dpll.simplify())
+		return CheckResult::UNSATISFIABLE;
+
+	cout << "Simplified to\n--bounds--\n" << endl << toString(_solvingState.bounds) << "--bool--\n" << toString(_dpll) << endl;
+
+	// TODO could run this check already even though not all variables are assigned
+	// and return unsat if it is already unsat.
+	if (_dpll.clauses.empty())
+	{
+		cout << "Invoking LP..." << endl;
+		_solvingState.constraints.clear();
+		for (size_t c: _dpll.constraints)
+			_solvingState.constraints.emplace_back(constraint(c));
+		auto result = m_lpSolver.check(_solvingState, {});//_expressionsToEvaluate);
+		return result.first;
+	}
+
+	size_t varIndex = _dpll.findUnassignedVariable();
+
+	DPLL copy = _dpll;
+	if (_dpll.setVariable(varIndex, true))
+	{
+		cout << "Trying " << variableName(varIndex) << " = true\n";
+		if (runDPLL(_solvingState, move(_dpll)) == CheckResult::SATISFIABLE)
+		{
+			cout << "satisfiable" << endl;
+			return CheckResult::SATISFIABLE;
+		}
+	}
+	cout << "Trying " << variableName(varIndex) << " = false\n";
+	if (!copy.setVariable(varIndex, false))
+		return CheckResult::UNSATISFIABLE;
+	return runDPLL(_solvingState, move(copy));
+}
+
+string BooleanLPSolver::toString(DPLL const& _dpll) const
+{
+	string result;
+	for (size_t c: _dpll.constraints)
+		result += toString(Clause{{Literal{Literal::Constraint, c}}});
+	for (Clause const& c: _dpll.clauses)
+		result += toString(c);
+	return result;
+}
+
+string BooleanLPSolver::toString(std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> const& _bounds) const
+{
+	string result;
+	for (auto&& [index, bounds]: _bounds | ranges::view::enumerate)
+	{
+		if (!bounds[0] && !bounds[1])
+			continue;
+		if (bounds[0])
+			result += ::toString(*bounds[0]) + " <= ";
+		// TODO If the variables are compressed, this does no longer work.
+		result += variableName(index);
+		if (bounds[1])
+			result += " <= " + ::toString(*bounds[1]);
+		result += "\n";
+	}
+	return result;
+}
+
+string BooleanLPSolver::toString(Clause const& _clause) const
+{
+	vector<string> literals;
+	for (Literal const& l: _clause.literals)
+		if (l.kind == Literal::Constraint)
+		{
+			Constraint const& constr = constraint(l.index);
+			vector<string> line;
+			for (auto&& [index, multiplier]: constr.data | ranges::views::enumerate)
+				if (index > 0 && multiplier != 0)
+				{
+					string mult =
+						multiplier == -1 ?
+						"-" :
+						multiplier == 1 ?
+						"" :
+						::toString(multiplier) + " ";
+					line.emplace_back(mult + variableName(index));
+				}
+			literals.emplace_back(joinHumanReadable(line, " + ") + (constr.equality ? "  = " : " <= ") + ::toString(constr.data.front()));
+		}
+		else
+			literals.emplace_back((l.kind == Literal::NegativeVariable ? "!" : "") + variableName(l.index));
+	return joinHumanReadable(literals, "  \\/  ") + "\n";
 }
 
 Constraint const& BooleanLPSolver::constraint(size_t _index) const
