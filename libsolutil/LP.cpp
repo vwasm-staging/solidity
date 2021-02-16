@@ -1037,6 +1037,15 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 			// TOOD `a = (x = y)` for ratianal x, y
 			else
 			{
+				if (rightExpr.arguments.empty() && isBooleanVariable(rightExpr.name))
+				{
+					optional<Literal> right = parseLiteral(rightExpr);
+					solAssert(right, "");
+					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*left), *right}});
+					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*right), *left}});
+					return;
+				}
+				// TODO `a = b` for boolean a, b
 				 // TODO if not, we should introduce boolean variables inside the solver.
 				 if (
 					!isBooleanVariable(rightExpr.arguments.at(0).name) ||
@@ -1072,6 +1081,7 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 	}
 	else if (_expr.name == "or")
 	{
+		// TODO this only works if one arg is not a constraint
 		// TODO we could even try to parse a full clause here
 		optional<Literal> left = parseLiteral(_expr.arguments.at(0));
 		optional<Literal> right = parseLiteral(_expr.arguments.at(1));

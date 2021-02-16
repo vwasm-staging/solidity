@@ -76,23 +76,16 @@ private:
 	smtutil::Expression int2bv(smtutil::Expression _arg) const;
 	smtutil::Expression bv2int(smtutil::Expression _arg) const;
 
-	smtutil::Expression newVariable(std::string const& _name = {});
-	smtutil::Expression newRestrictedVariable(std::string const& _name = {});
+	smtutil::Expression newRestrictedVariable(std::string const& _name = {}, bool _boolean = false);
 	std::string uniqueName();
 
 	bool makesInfeasible(smtutil::Expression _constraint);
 	bool feasible();
 	bool infeasible();
 
-	// Add a boolean variable and check whether it is constant true or constant false.
-	// @param _value the value of the variable.
-	// @param _negations a disjunction of expressions representing the negation of _value.
-	void tryAddBoolean(YulString _varName, smtutil::Expression _value, std::vector<smtutil::Expression> const& _negations);
-
-	void restrictEqualZero(smtutil::Expression _constraint);
-	void restrictNonzero(smtutil::Expression _constraint);
-
 	YulString localVariableFromExpression(std::string const& _expressionName);
+
+	bool isBoolean(Expression const& _expression) const;
 
 	virtual std::shared_ptr<smtutil::Sort> defaultSort() const;
 	virtual smtutil::Expression booleanValue(smtutil::Expression _value) const;
@@ -103,7 +96,7 @@ private:
 	std::set<YulString> const& m_ssaVariables;
 	std::unique_ptr<smtutil::SolverInterface> m_solver;
 	std::map<YulString, smtutil::Expression> m_variables;
-	std::map<YulString, smtutil::Expression> m_nonEncodedValues;
+	std::set<std::string> m_booleanVariables;
 
 	size_t m_varCounter = 0;
 };

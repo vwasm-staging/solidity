@@ -63,8 +63,11 @@ void ReasoningBasedSimplifier::operator()(VariableDeclaration& _varDecl)
 	YulString varName = _varDecl.variables.front().name;
 	if (!m_ssaVariables.count(varName))
 		return;
-	// TODO should be boolean depending on th efunction
-	smtutil::Expression variable = newRestrictedVariable("yul_" + varName.str());
+
+	smtutil::Expression variable = newRestrictedVariable(
+		"yul_" + varName.str(),
+		_varDecl.value && isBoolean(*_varDecl.value)
+	);
 	bool const inserted = m_variables.insert({varName, variable}).second;
 	yulAssert(inserted, "");
 	if (!_varDecl.value)
@@ -111,10 +114,11 @@ void ReasoningBasedSimplifier::operator()(If& _if)
 	}
 	smtutil::Expression cond = m_variables.at(condition.name);
 
-	m_solver->push();
-	restrictEqualZero(cond);
-	bool constantTrue = infeasible();
-	m_solver->pop();
+	bool constantTrue = makesInfeasible(
+		isBoolean(*_if.condition) ?
+		!cond :
+		(cond == bigint(0))
+	);
 
 	if (constantTrue)
 	{
@@ -124,10 +128,11 @@ void ReasoningBasedSimplifier::operator()(If& _if)
 	}
 	else
 	{
-		m_solver->push();
-		restrictNonzero(cond);
-		bool constantFalse = infeasible();
-		m_solver->pop();
+		bool constantFalse = makesInfeasible(
+			isBoolean(*_if.condition) ?
+			cond :
+			(cond > bigint(0))
+		);
 
 		if (constantFalse)
 		{
@@ -141,7 +146,10 @@ void ReasoningBasedSimplifier::operator()(If& _if)
 	}
 
 	m_solver->push();
-	restrictNonzero(cond);
+	if (isBoolean(*_if.condition))
+		m_solver->addAssertion(cond);
+	else
+		m_solver->addAssertion(cond > bigint(0));
 
 	ASTModifier::operator()(_if.body);
 
@@ -190,13 +198,25 @@ void ReasoningBasedSimplifier::handleDeclaration(
 	switch (_instruction)
 	{
 	case evmasm::Instruction::ADD:
-		if (makesInfeasible(*x + *y >= smtutil::Expression(bigint(1) << 256)))
-			m_solver->addAssertion(variable == *x + *y);
+	{
+		// TODO equalities need to be split
+		smtutil::Expression overflow = m_solver->newVariable(uniqueName(), SortProvider::boolSort);
+		m_solver->addAssertion(overflow || (variable <= *x + *y));
+		m_solver->addAssertion(overflow || (variable >= *x + *y));
+		m_solver->addAssertion(!overflow || (variable <= *x + *y - smtutil::Expression(bigint(1) << 256)));
+		m_solver->addAssertion(!overflow || (variable >= *x + *y - smtutil::Expression(bigint(1) << 256)));
 		break;
+	}
 	case evmasm::Instruction::SUB:
-		if (makesInfeasible(*x - *y < 0))
-			m_solver->addAssertion(variable == *x - *y);
+	{
+		smtutil::Expression underflow = m_solver->newVariable(uniqueName(), SortProvider::boolSort);
+		// TODO equalities need to be split
+		m_solver->addAssertion(underflow || (variable >= *x - *y));
+		m_solver->addAssertion(underflow || (variable <= *x - *y));
+		m_solver->addAssertion(!underflow || (variable >= *x - *y + smtutil::Expression(bigint(1) << 256)));
+		m_solver->addAssertion(!underflow || (variable <= *x - *y + smtutil::Expression(bigint(1) << 256)));
 		break;
+	}
 	//case evmasm::Instruction::MUL:
 		// TODO encode constants?
 	//case evmasm::Instruction::DIV:
@@ -204,25 +224,50 @@ void ReasoningBasedSimplifier::handleDeclaration(
 		m_solver->addAssertion(variable < *z);
 		break;
 	case evmasm::Instruction::LT:
-		tryAddBoolean(_varName, *x < *y, {*x >= *y});
+		m_solver->addAssertion(variable == (*x < *y));
 		break;
 	case evmasm::Instruction::GT:
-		tryAddBoolean(_varName, *x > *y, {*x <= *y});
+		m_solver->addAssertion(variable == (*x > *y));
+		break;
+	case evmasm::Instruction::SLT:
+		// TODO
+		break;
+	case evmasm::Instruction::SGT:
+		// TODO
 		break;
 	case evmasm::Instruction::EQ:
-		tryAddBoolean(_varName, *x == *y, {*x < *y, *x > *y});
+		// TODO boolean case is not taken into account yet.
+		if (isBoolean(_arguments.at(0)) && isBoolean(_arguments.at(1)))
+		{
+			// TODO split equality
+			m_solver->addAssertion(variable == (*x == *y));
+		}
+		else
+		{
+			m_solver->addAssertion(variable == (*x <= *y));
+			m_solver->addAssertion(variable == (*x >= *y));
+		}
 		break;
 	case evmasm::Instruction::ISZERO:
-		tryAddBoolean(_varName, !*x, {*x});
+		if (isBoolean(_arguments.at(0)))
+			m_solver->addAssertion(variable == (!*x));
+		else
+			m_solver->addAssertion(variable == (*x <= smtutil::Expression(bigint(0))));
 		break;
 	case evmasm::Instruction::AND:
-		m_solver->addAssertion(variable <= *x && variable <= *y);
-		m_nonEncodedValues.insert({_varName, *x && *y});
+		if (m_booleanVariables.count(_varName.str()))
+			m_solver->addAssertion(variable == (*x && *y));
+		else
+			m_solver->addAssertion(variable <= *x && variable <= *y);
 		break;
 	case evmasm::Instruction::OR:
-		m_solver->addAssertion(variable >= *x && variable >= *y);
-		m_solver->addAssertion(variable <= *x + *y);
-		m_nonEncodedValues.insert({_varName, *x || *y});
+		if (m_booleanVariables.count(_varName.str()))
+			m_solver->addAssertion(variable == (*x || *y));
+		else
+		{
+			m_solver->addAssertion(variable >= *x && variable >= *y);
+			m_solver->addAssertion(variable <= *x + *y);
+		}
 		break;
 	// TODO all builtins whose return values can be restricted.
 	default:
@@ -230,15 +275,14 @@ void ReasoningBasedSimplifier::handleDeclaration(
 	}
 }
 
-smtutil::Expression ReasoningBasedSimplifier::newVariable(string const& _name)
+smtutil::Expression ReasoningBasedSimplifier::newRestrictedVariable(string const& _name, bool _boolean)
 {
-	return m_solver->newVariable(_name.empty() ? uniqueName() : _name, defaultSort());
-}
-
-smtutil::Expression ReasoningBasedSimplifier::newRestrictedVariable(string const& _name)
-{
-	smtutil::Expression var = newVariable(_name);
-	m_solver->addAssertion(var < smtutil::Expression(bigint(1) << 256));
+	string name = _name.empty() ? uniqueName() : _name;
+	if (_boolean)
+		m_booleanVariables.insert(name);
+	smtutil::Expression var = m_solver->newVariable(name, _boolean ? SortProvider::boolSort : defaultSort());
+	if (!_boolean)
+		m_solver->addAssertion(var < smtutil::Expression(bigint(1) << 256));
 	return var;
 }
 
@@ -268,33 +312,6 @@ bool ReasoningBasedSimplifier::infeasible()
 	return result == CheckResult::UNSATISFIABLE;
 }
 
-void ReasoningBasedSimplifier::tryAddBoolean(
-	YulString _varName,
-	smtutil::Expression _value,
-	vector<smtutil::Expression> const& _negations
-)
-{
-	smtutil::Expression variable = m_variables.at(_varName);
-
-	if (makesInfeasible(_value))
-	{
-		m_solver->addAssertion(variable == 0);
-		if (_negations.size() == 1)
-			m_solver->addAssertion(_negations.front());
-		return;
-	}
-	for (smtutil::Expression const& negation: _negations)
-		if (makesInfeasible(negation))
-		{
-			m_solver->addAssertion(variable == 1);
-			m_solver->addAssertion(_value);
-			return;
-		}
-
-	m_solver->addAssertion(variable <= 1);
-	m_nonEncodedValues.insert({_varName, _value});
-}
-
 YulString ReasoningBasedSimplifier::localVariableFromExpression(string const& _expressionName)
 {
 	solAssert(_expressionName.substr(0, 4) == "yul_", "");
@@ -302,68 +319,44 @@ YulString ReasoningBasedSimplifier::localVariableFromExpression(string const& _e
 
 }
 
-void ReasoningBasedSimplifier::restrictEqualZero(smtutil::Expression _constraint)
+bool ReasoningBasedSimplifier::isBoolean(Expression const& _expression) const
 {
-	m_solver->addAssertion(_constraint == constantValue(0));
-
-	if (_constraint.arguments.empty())
-	{
-		// TODO the whole solver has to be change so that it can either return
-		// "infeasible" or "unknown".
-		// This means we can always drop constraintse, and we can move these to restriction
-		// functions into the solver itself.
-		YulString localVar = localVariableFromExpression(_constraint.name);
-		if (m_nonEncodedValues.count(localVar))
-			restrictEqualZero(m_nonEncodedValues.at(localVar));
-	}
-	else if (_constraint.name == "or")
-	{
-		restrictEqualZero(_constraint.arguments.at(0));
-		restrictEqualZero(_constraint.arguments.at(1));
-	}
-	else if (_constraint.name == "not")
-		restrictNonzero(_constraint.arguments.at(0));
-	else if (_constraint.name == ">=")
-		m_solver->addAssertion(_constraint.arguments.at(0) < _constraint.arguments.at(1));
-	else if (_constraint.name == "<=")
-		m_solver->addAssertion(_constraint.arguments.at(0) > _constraint.arguments.at(1));
-	else if (_constraint.name == ">")
-		m_solver->addAssertion(_constraint.arguments.at(0) <= _constraint.arguments.at(1));
-	else if (_constraint.name == "<")
-		m_solver->addAssertion(_constraint.arguments.at(0) >= _constraint.arguments.at(1));
-}
-
-void ReasoningBasedSimplifier::restrictNonzero(smtutil::Expression _constraint)
-{
-	m_solver->addAssertion(_constraint >= constantValue(1));
-
-	if (_constraint.arguments.empty())
-	{
-		// TODO the whole solver has to be change so that it can either return
-		// "infeasible" or "unknown".
-		// This means we can always drop constraintse, and we can move these to restriction
-		// functions into the solver itself.
-		YulString localVar = localVariableFromExpression(_constraint.name);
-		if (m_nonEncodedValues.count(localVar))
-			restrictNonzero(m_nonEncodedValues.at(localVar));
-	}
-	else if (_constraint.name == "and")
-	{
-		restrictNonzero(_constraint.arguments.at(0));
-		restrictNonzero(_constraint.arguments.at(1));
-	}
-	else if (_constraint.name == "not")
-		restrictEqualZero(_constraint.arguments.at(0));
-	else if (_constraint.name == ">=")
-		m_solver->addAssertion(_constraint.arguments.at(0) >= _constraint.arguments.at(1));
-	else if (_constraint.name == "<=")
-		m_solver->addAssertion(_constraint.arguments.at(0) <= _constraint.arguments.at(1));
-	else if (_constraint.name == ">")
-		m_solver->addAssertion(_constraint.arguments.at(0) > _constraint.arguments.at(1));
-	else if (_constraint.name == "<")
-		m_solver->addAssertion(_constraint.arguments.at(0) < _constraint.arguments.at(1));
-	else if (_constraint.name == "=")
-		m_solver->addAssertion(_constraint.arguments.at(0) == _constraint.arguments.at(1));
+	return std::visit(GenericVisitor{
+		[&](FunctionCall const& _functionCall)
+		{
+			if (auto const* dialect = dynamic_cast<EVMDialect const*>(&m_dialect))
+				if (auto const* builtin = dialect->builtin(_functionCall.functionName.name))
+							  // TODO assert
+					switch (*builtin->instruction)
+					{
+					case evmasm::Instruction::LT:
+					case evmasm::Instruction::GT:
+					case evmasm::Instruction::SLT:
+					case evmasm::Instruction::SGT:
+					case evmasm::Instruction::EQ:
+					case evmasm::Instruction::ISZERO:
+						return true;
+					case evmasm::Instruction::AND:
+					case evmasm::Instruction::OR:
+						return
+							isBoolean(_functionCall.arguments.at(0)) &&
+							isBoolean(_functionCall.arguments.at(1));
+					case evmasm::Instruction::NOT:
+						return isBoolean(_functionCall.arguments.at(0));
+					default:
+						break;
+					}
+			return false;
+		},
+		[&](Identifier const& _identifier) -> bool
+		{
+			return m_booleanVariables.count("yul_" + _identifier.name.str());
+		},
+		[&](Literal const& _literal)
+		{
+			return _literal.kind == LiteralKind::Boolean;
+		}
+	}, _expression);
 }
 
 shared_ptr<Sort> ReasoningBasedSimplifier::defaultSort() const
