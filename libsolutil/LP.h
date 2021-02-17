@@ -89,8 +89,7 @@ enum class LPResult
 class LPSolver
 {
 public:
-	std::pair<smtutil::CheckResult, std::vector<std::string>>
-	check(SolvingState _state, std::vector<smtutil::Expression> const& _expressionsToEvaluate);
+	std::pair<smtutil::CheckResult, std::map<std::string, boost::rational<bigint>>> check(SolvingState _state);
 
 private:
 	std::map<SolvingState, LPResult> m_cache;
@@ -100,7 +99,7 @@ struct DPLL
 {
 	/// Try to simplify the set of clauses without branching.
 	/// @returns false if the set of clauses is unsatisfiable (without considering the constraints).
-	bool simplify();
+	std::pair<bool, std::map<size_t, bool>> simplify();
 	size_t findUnassignedVariable() const;
 	bool setVariable(size_t _index, bool _value);
 	/// Sets variables and removes clauses or literals from clauses.
@@ -125,6 +124,8 @@ public:
 
 	std::pair<smtutil::CheckResult, std::vector<std::string>>
 	check(std::vector<smtutil::Expression> const& _expressionsToEvaluate) override;
+
+	std::pair<smtutil::CheckResult, std::map<std::string, boost::rational<bigint>>> check();
 
 	std::string toString() const;
 
@@ -156,7 +157,7 @@ private:
 
 	void addBooleanEquality(Literal const& _left, smtutil::Expression const& _right);
 
-	smtutil::CheckResult runDPLL(SolvingState& _solvingState, DPLL _dpll);
+	std::pair<smtutil::CheckResult, std::map<std::string, rational>> runDPLL(SolvingState& _solvingState, DPLL _dpll);
 	std::string toString(DPLL const& _dpll) const;
 	std::string toString(std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> const& _bounds) const;
 	std::string toString(Clause const& _clause) const;

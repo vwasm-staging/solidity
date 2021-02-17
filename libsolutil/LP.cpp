@@ -874,17 +874,18 @@ string SolvingState::toString() const
 }
 
 
-bool DPLL::simplify()
+pair<bool, map<size_t, bool>> DPLL::simplify()
 {
+	// TODO use vector?
+	map<size_t, bool> assignments;
 	while (!clauses.empty() && !ranges::all_of(clauses, [](Clause const& _c) { return _c.literals.size() > 1; }))
 	{
-		map<size_t, bool> assignments;
-
 		// TODO this assumes that no clause contains more than one constraint
+		// TODO add an assertion for that.
 
 		for (Clause const& c: clauses)
 			if (c.literals.empty())
-				return false;
+				return {false, {}};
 			else if (c.literals.size() == 1)
 			{
 				Literal const& literal = c.literals.front();
@@ -894,16 +895,16 @@ bool DPLL::simplify()
 				{
 					bool value = literal.kind == Literal::PositiveVariable ? true : false;
 					if (assignments.count(literal.index) && assignments.at(literal.index) != value)
-						return false;
+						return {false, {}};
 					//cout << "Assigning" << variableName(literal.index) << " " << value << endl;
 					assignments[literal.index] = value;
 				}
 			}
 
-		if (!setVariables(assignments,  true))
-			return false;
+		if (!setVariables(assignments, true))
+			return {false, {}};
 	}
-	return true;
+	return {true, move(assignments)};
 }
 
 size_t DPLL::findUnassignedVariable() const
@@ -986,7 +987,7 @@ void BooleanLPSolver::pop()
 void BooleanLPSolver::declareVariable(string const& _name, SortPointer const& _sort)
 {
 	// Internal variables are '$<number>'
-	string name = (_name.empty() || _name.at(1) != '$') ? _name : "$$" + _name;
+	string name = (_name.empty() || _name.at(0) != '$') ? _name : "$$" + _name;
 	// TODO This will not be an integer variable in our model.
 	// Introduce a new kind?
 	solAssert(_sort && (_sort->kind == Kind::Int || _sort->kind == Kind::Bool), "");
@@ -1073,7 +1074,7 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 		addAssertion(_expr.arguments.at(1) < _expr.arguments.at(0));
 }
 
-pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Expression> const& _expressionsToEvaluate)
+pair<CheckResult, map<string, rational>> LPSolver::check(SolvingState _state)
 {
 	SolvingState state = move(_state);
 	normalizeRowLengths(state);
@@ -1086,7 +1087,7 @@ pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Ex
 	if (!simplifySolvingState(state, model))
 	{
 		//cout << "LP: infeasible." << endl;
-		return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+		return {CheckResult::UNSATISFIABLE, {}};
 	}
 	//cout << "Simplified to:\n" << toString(state) << endl;
 	//cout << "----------------------------------------" << endl;
@@ -1132,7 +1133,7 @@ pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Ex
 			break;
 		case LPResult::Infeasible:
 			//cout << "infeasible after simplex" << endl;
-			return make_pair(CheckResult::UNSATISFIABLE, vector<string>{});
+			return {CheckResult::UNSATISFIABLE, {}};
 		case LPResult::Unknown:
 			//cout << "unknown after simplex" << endl;
 			// We do not stop here, because another independent query can still be infeasible.
@@ -1150,20 +1151,9 @@ pair<CheckResult, vector<string>> LPSolver::check(SolvingState _state, vector<Ex
 
 	//cout << "LP: feasible / unbounded, because no constraints left." << endl;
 	if (solveInteger || canOnlyBeUnknown)
-		return make_pair(CheckResult::UNKNOWN, vector<string>{});
+		return {CheckResult::UNKNOWN, {}};
 
-	vector<string> requestedModel;
-	for (Expression const& e: _expressionsToEvaluate)
-	{
-		if (e.arguments.empty() && model.count(e.name))
-			requestedModel.emplace_back(toString(model[e.name], 0));
-		else
-		{
-			requestedModel = {};
-			break;
-		}
-	}
-	return make_pair(CheckResult::SATISFIABLE, move(requestedModel));
+	return {CheckResult::SATISFIABLE, move(model)};
 }
 
 
@@ -1187,8 +1177,20 @@ pair<CheckResult, vector<string>> BooleanLPSolver::check(vector<Expression> cons
 		for (Clause const& clause: s.clauses)
 			clauses.push_back(clause);
 
-	(void)_expressionsToEvaluate;
-	return {runDPLL(state, DPLL{move(clauses), {}}), {}};
+	auto&& [result, model] = runDPLL(state, DPLL{move(clauses), {}});
+	if (result == CheckResult::SATISFIABLE)
+	{
+		vector<string> requestedModel;
+		for (Expression const& e: _expressionsToEvaluate)
+			requestedModel.emplace_back(
+				e.arguments.empty() && model.count(e.name) ?
+				::toString(model[e.name], 0) :
+				string("unknown")
+			);
+		return {result, move(requestedModel)};
+	}
+	else
+		return {result, {}};
 }
 
 string BooleanLPSolver::toString() const
@@ -1459,15 +1461,20 @@ void BooleanLPSolver::addBooleanEquality(Literal const& _left, smtutil::Expressi
 	}
 }
 
-// TODO not the full solving state, only the bounds
-CheckResult BooleanLPSolver::runDPLL(SolvingState& _solvingState, DPLL _dpll)
+
+// TODO as input we do not need the full solving state, only the bounds
+pair<CheckResult, map<string, rational>> BooleanLPSolver::runDPLL(SolvingState& _solvingState, DPLL _dpll)
 {
-	cout << "Running dpll on" << endl << toString(_solvingState.bounds) << "\n--bool--\n" << toString(_dpll) << endl;
-	if (!_dpll.simplify())
-		return CheckResult::UNSATISFIABLE;
+	cout << "Running dpll on" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
 
-	cout << "Simplified to\n--bounds--\n" << endl << toString(_solvingState.bounds) << "--bool--\n" << toString(_dpll) << endl;
+	auto&& [simplifyResult, booleanModel] = _dpll.simplify();
+	if (!simplifyResult)
+		return {CheckResult::UNSATISFIABLE, {}};
 
+	cout << "Simplified to" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
+
+	CheckResult result = CheckResult::UNKNOWN;
+	map<string, rational> model;
 	// TODO could run this check already even though not all variables are assigned
 	// and return unsat if it is already unsat.
 	if (_dpll.clauses.empty())
@@ -1476,26 +1483,38 @@ CheckResult BooleanLPSolver::runDPLL(SolvingState& _solvingState, DPLL _dpll)
 		_solvingState.constraints.clear();
 		for (size_t c: _dpll.constraints)
 			_solvingState.constraints.emplace_back(constraint(c));
-		auto result = m_lpSolver.check(_solvingState, {});//_expressionsToEvaluate);
-		return result.first;
+		// TODO model for booleans
+		tie(result, model) = m_lpSolver.check(_solvingState);
 	}
-
-	size_t varIndex = _dpll.findUnassignedVariable();
-
-	DPLL copy = _dpll;
-	if (_dpll.setVariable(varIndex, true))
+	else
 	{
-		cout << "Trying " << variableName(varIndex) << " = true\n";
-		if (runDPLL(_solvingState, move(_dpll)) == CheckResult::SATISFIABLE)
+		size_t varIndex = _dpll.findUnassignedVariable();
+
+		DPLL copy = _dpll;
+		if (_dpll.setVariable(varIndex, true))
 		{
-			cout << "satisfiable" << endl;
-			return CheckResult::SATISFIABLE;
+			booleanModel[varIndex] = true;
+			cout << "Trying " << variableName(varIndex) << " = true\n";
+			tie(result, model) = runDPLL(_solvingState, move(_dpll));
+			// TODO actually we should also handle UNKNOWN here.
+		}
+		else if (result != CheckResult::SATISFIABLE)
+		{
+			cout << "Trying " << variableName(varIndex) << " = false\n";
+			if (!copy.setVariable(varIndex, false))
+				return {CheckResult::UNSATISFIABLE, {}};
+			booleanModel[varIndex] = false;
+			auto&& [result, model] = runDPLL(_solvingState, move(copy));
 		}
 	}
-	cout << "Trying " << variableName(varIndex) << " = false\n";
-	if (!copy.setVariable(varIndex, false))
-		return CheckResult::UNSATISFIABLE;
-	return runDPLL(_solvingState, move(copy));
+	if (result == CheckResult::SATISFIABLE)
+	{
+		for (auto const& [index, value]: booleanModel)
+			model[variableName(index)] = value ? 1 : 0;
+		return {result, move(model)};
+	}
+	else
+		return {result, {}};
 }
 
 string BooleanLPSolver::toString(DPLL const& _dpll) const
