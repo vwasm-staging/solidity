@@ -955,6 +955,9 @@ bool DPLL::setVariables(map<size_t, bool> const& _assignments, bool _removeSingl
 void BooleanLPSolver::reset()
 {
 	m_state = vector<State>{{State{}}};
+	m_internalVariableCounter = 0;
+	m_constraintCounter = 0;
+	// Do not reset the solver, it should retain its cache.
 }
 
 void BooleanLPSolver::push()
@@ -982,12 +985,13 @@ void BooleanLPSolver::pop()
 
 void BooleanLPSolver::declareVariable(string const& _name, SortPointer const& _sort)
 {
+	// Internal variables are '$<number>'
+	string name = (_name.empty() || _name.at(1) != '$') ? _name : "$$" + _name;
 	// TODO This will not be an integer variable in our model.
 	// Introduce a new kind?
-	// TODO distinguish internal and external variables
 	solAssert(_sort && (_sort->kind == Kind::Int || _sort->kind == Kind::Bool), "");
-	solAssert(!m_state.back().variables.count(_name), "");
-	declareVariable(_name, _sort->kind == Kind::Bool);
+	solAssert(!m_state.back().variables.count(name), "");
+	declareVariable(name, _sort->kind == Kind::Bool);
 }
 
 void BooleanLPSolver::addAssertion(Expression const& _expr)
@@ -1011,67 +1015,14 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 			}
 		}
 		else if (_expr.arguments.at(0).arguments.empty() && isBooleanVariable(_expr.arguments.at(0).name))
+			addBooleanEquality(*parseLiteral(_expr.arguments.at(0)), _expr.arguments.at(1));
+		else if (_expr.arguments.at(1).arguments.empty() && isBooleanVariable(_expr.arguments.at(1).name))
+			addBooleanEquality(*parseLiteral(_expr.arguments.at(1)), _expr.arguments.at(0));
+		else
 		{
-			optional<Literal> left = parseLiteral(_expr.arguments.at(0));
-			solAssert(left, "");
-			Expression const& rightExpr = _expr.arguments.at(1);
-
-			// special cases:
-			// a = b <=> (-a \/ b) /\ (a \/ -b)
-			// a = and(x, y) <=> (-a \/ x) /\ ( -a \/ y) /\ (a \/ -x \/ -y)
-			// a = or(x, y) <=> (-a \/ x \/ y) /\ (a \/ -x) /\ (a \/ -y)
-			// a = ~x <=> (-a \/ -x) /\ (a \/ x)
-			// a = (x <= y)
-			// a = (x = y)
-			if (optional<Literal> right = parseLiteral(rightExpr))
-			{
-				 // includes: not, <=, <, >=, >, simple variables.
-				 // a = b <=> (-a \/ b) /\ (a \/ -b)
-				 optional<Literal> negLeft = negate(*left);
-				 optional<Literal> negRight = negate(*right);
-				 if (!negLeft || !negRight)
-					 return;
-				 m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negLeft, *right}});
-				 m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *negRight}});
-			}
-			// TOOD `a = (x = y)` for ratianal x, y
-			else
-			{
-				if (rightExpr.arguments.empty() && isBooleanVariable(rightExpr.name))
-				{
-					optional<Literal> right = parseLiteral(rightExpr);
-					solAssert(right, "");
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*left), *right}});
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*right), *left}});
-					return;
-				}
-				// TODO `a = b` for boolean a, b
-				 // TODO if not, we should introduce boolean variables inside the solver.
-				 if (
-					!isBooleanVariable(rightExpr.arguments.at(0).name) ||
-					!isBooleanVariable(rightExpr.arguments.at(1).name)
-				 )
-					return;
-				 optional<Literal> a = parseLiteral(rightExpr.arguments.at(0));
-				 optional<Literal> b = parseLiteral(rightExpr.arguments.at(1));
-				 solAssert(a && b, "");
-
-				// TODO handle `a = (b = c)`?
-				// a = and(x, y) <=> (-a \/ x) /\ ( -a \/ y) /\ (a \/ -x \/ -y)
-				// a = or(x, y) <=> (-a \/ x \/ y) /\ (a \/ -x) /\ (a \/ -y)
-				if (rightExpr.name == "and")
-				{
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*left), *a}});
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*left), *b}});
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *negate(*a), *negate(*b)}});
-				}
-				else if (rightExpr.name == "or")
-				{
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*left), *a, *b}});
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *negate(*a)}});
-					m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *negate(*b)}});
-				}
-			}
+			Literal const& newBoolean = *parseLiteral(declareInternalBoolean());
+			addBooleanEquality(newBoolean, _expr.arguments.at(0));
+			addBooleanEquality(newBoolean, _expr.arguments.at(1));
 		}
 	}
 	else if (_expr.name == "and")
@@ -1081,17 +1032,22 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 	}
 	else if (_expr.name == "or")
 	{
-		// TODO this only works if one arg is not a constraint
-		// TODO we could even try to parse a full clause here
-		optional<Literal> left = parseLiteral(_expr.arguments.at(0));
-		optional<Literal> right = parseLiteral(_expr.arguments.at(1));
-		if (left && right)
-			m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *right}});
+		// We could try to parse a full clause here.
+		optional<Literal> left = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(0));
+		optional<Literal> right = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(1));
+		solAssert(left && right, "");
+		if (left->kind == Literal::Constraint && right->kind == Literal::Constraint)
+		{
+			// We cannot have more than one constraint per clause.
+			*left = *parseLiteral(declareInternalBoolean());
+			addBooleanEquality(*left, _expr.arguments.at(0));
+		}
+		m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *right}});
 	}
 	else if (_expr.name == "not")
 	{
 		if (optional<Literal> inner = parseLiteral(_expr.arguments.at(0)))
-			m_state.back().clauses.emplace_back(Clause{vector<Literal>{*negate(*inner)}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(*inner)}});
 	}
 	else if (_expr.name == "<=")
 	{
@@ -1258,6 +1214,13 @@ string BooleanLPSolver::toString() const
 	return result;
 }
 
+Expression BooleanLPSolver::declareInternalBoolean()
+{
+	string name = "$" + to_string(m_internalVariableCounter++);
+	declareVariable(name, true);
+	return smtutil::Expression(name, {}, SortProvider::boolSort);
+}
+
 void BooleanLPSolver::declareVariable(string const& _name, bool _boolean)
 {
 	size_t index = m_state.back().variables.size() + 1;
@@ -1304,7 +1267,7 @@ optional<Literal> BooleanLPSolver::parseLiteral(smtutil::Expression const& _expr
 	return {};
 }
 
-optional<Literal> BooleanLPSolver::negate(Literal const& _lit)
+Literal BooleanLPSolver::negate(Literal const& _lit)
 {
 	switch (_lit.kind)
 	{
@@ -1318,9 +1281,7 @@ optional<Literal> BooleanLPSolver::negate(Literal const& _lit)
 
 	Constraint const& c = constraint(_lit.index);
 
-	// TODO We can solve 'not equal' by introducing a new boolean
-	if (c.equality)
-		return {};
+	solAssert(!c.equality, "");
 
 	// X > b
 	// -x < -b
@@ -1331,6 +1292,18 @@ optional<Literal> BooleanLPSolver::negate(Literal const& _lit)
 	negated.data[0] -= 1;
 
 	return Literal{Literal::Constraint, addConstraint(move(negated))};
+}
+
+Literal BooleanLPSolver::parseLiteralOrReturnEqualBoolean(Expression const& _expr)
+{
+	if (_expr.arguments.empty() && isBooleanVariable(_expr.name))
+		return *parseLiteral(_expr);
+	else
+	{
+		Literal newBoolean = *parseLiteral(declareInternalBoolean());
+		addBooleanEquality(newBoolean, _expr);
+		return newBoolean;
+	}
 }
 
 optional<vector<rational>> BooleanLPSolver::parseLinearSum(smtutil::Expression const& _expr) const
@@ -1434,6 +1407,56 @@ size_t BooleanLPSolver::addConstraint(Constraint _constraint)
 	size_t index = ++m_constraintCounter;
 	m_state.back().constraints[index] = move(_constraint);
 	return index;
+}
+
+void BooleanLPSolver::addBooleanEquality(Literal const& _left, smtutil::Expression const& _right)
+{
+	if (optional<Literal> right = parseLiteral(_right))
+	{
+		 // includes: not, <=, <, >=, >, boolean variables.
+		 // a = b <=> (-a \/ b) /\ (a \/ -b)
+		 Literal negLeft = negate(_left);
+		 Literal negRight = negate(*right);
+		 m_state.back().clauses.emplace_back(Clause{vector<Literal>{negLeft, *right}});
+		 m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, negRight}});
+	}
+	else if (_right.name == "=" && parseLinearSum(_right.arguments.at(0)) && parseLinearSum(_right.arguments.at(1)))
+		// a = (x = y)  <=>  a = (x <= y && x >= y)
+		addBooleanEquality(
+			_left,
+			_right.arguments.at(0) <= _right.arguments.at(1) &&
+			_right.arguments.at(1) <= _right.arguments.at(0)
+		);
+	else
+	{
+		Literal a = parseLiteralOrReturnEqualBoolean(_right.arguments.at(0));
+		Literal b = parseLiteralOrReturnEqualBoolean(_right.arguments.at(1));
+
+		if (_right.name == "and")
+		{
+			// a = and(x, y) <=> (-a \/ x) /\ ( -a \/ y) /\ (a \/ -x \/ -y)
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(_left), a}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(_left), b}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, negate(a), negate(b)}});
+		}
+		else if (_right.name == "or")
+		{
+			// a = or(x, y) <=> (-a \/ x \/ y) /\ (a \/ -x) /\ (a \/ -y)
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(_left), a, b}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, negate(a)}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, negate(b)}});
+		}
+		else if (_right.name == "=")
+		{
+			// l = eq(a, b) <=> (-l or -a or b) and (-l or a or -b) and (l or -a or -b) and (l or a or b)
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(_left), negate(a), b}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(_left), a, negate(b)}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, negate(a), negate(b)}});
+			m_state.back().clauses.emplace_back(Clause{vector<Literal>{_left, a, b}});
+		}
+		else
+			solAssert(false, "Unsupported operation: " + _right.name);
+	}
 }
 
 // TODO not the full solving state, only the bounds

@@ -199,22 +199,16 @@ void ReasoningBasedSimplifier::handleDeclaration(
 	{
 	case evmasm::Instruction::ADD:
 	{
-		// TODO equalities need to be split
 		smtutil::Expression overflow = m_solver->newVariable(uniqueName(), SortProvider::boolSort);
-		m_solver->addAssertion(overflow || (variable <= *x + *y));
-		m_solver->addAssertion(overflow || (variable >= *x + *y));
-		m_solver->addAssertion(!overflow || (variable <= *x + *y - smtutil::Expression(bigint(1) << 256)));
-		m_solver->addAssertion(!overflow || (variable >= *x + *y - smtutil::Expression(bigint(1) << 256)));
+		m_solver->addAssertion(overflow || (variable == *x + *y));
+		m_solver->addAssertion(!overflow || (variable == *x + *y - smtutil::Expression(bigint(1) << 256)));
 		break;
 	}
 	case evmasm::Instruction::SUB:
 	{
 		smtutil::Expression underflow = m_solver->newVariable(uniqueName(), SortProvider::boolSort);
-		// TODO equalities need to be split
-		m_solver->addAssertion(underflow || (variable >= *x - *y));
-		m_solver->addAssertion(underflow || (variable <= *x - *y));
-		m_solver->addAssertion(!underflow || (variable >= *x - *y + smtutil::Expression(bigint(1) << 256)));
-		m_solver->addAssertion(!underflow || (variable <= *x - *y + smtutil::Expression(bigint(1) << 256)));
+		m_solver->addAssertion(underflow || (variable == *x - *y));
+		m_solver->addAssertion(!underflow || (variable == *x - *y + smtutil::Expression(bigint(1) << 256)));
 		break;
 	}
 	//case evmasm::Instruction::MUL:
@@ -236,17 +230,7 @@ void ReasoningBasedSimplifier::handleDeclaration(
 		// TODO
 		break;
 	case evmasm::Instruction::EQ:
-		// TODO boolean case is not taken into account yet.
-		if (isBoolean(_arguments.at(0)) && isBoolean(_arguments.at(1)))
-		{
-			// TODO split equality
-			m_solver->addAssertion(variable == (*x == *y));
-		}
-		else
-		{
-			m_solver->addAssertion(variable == (*x <= *y));
-			m_solver->addAssertion(variable == (*x >= *y));
-		}
+		m_solver->addAssertion(variable == (*x == *y));
 		break;
 	case evmasm::Instruction::ISZERO:
 		if (isBoolean(_arguments.at(0)))

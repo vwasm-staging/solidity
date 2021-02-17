@@ -131,10 +131,13 @@ public:
 private:
 	using rational = boost::rational<bigint>;
 
+	smtutil::Expression declareInternalBoolean();
 	void declareVariable(std::string const& _name, bool _boolean);
 
 	std::optional<Literal> parseLiteral(smtutil::Expression const& _expr);
-	std::optional<Literal> negate(Literal const& _lit);
+	Literal negate(Literal const& _lit);
+
+	Literal parseLiteralOrReturnEqualBoolean(smtutil::Expression const& _expr);
 
 	/// Parses the expression and expects a linear sum of variables.
 	/// Returns a vector with the first element being the constant and the
@@ -151,6 +154,8 @@ private:
 
 	size_t addConstraint(Constraint _constraint);
 
+	void addBooleanEquality(Literal const& _left, smtutil::Expression const& _right);
+
 	smtutil::CheckResult runDPLL(SolvingState& _solvingState, DPLL _dpll);
 	std::string toString(DPLL const& _dpll) const;
 	std::string toString(std::vector<std::array<std::optional<boost::rational<bigint>>, 2>> const& _bounds) const;
@@ -164,7 +169,7 @@ private:
 	bool isBooleanVariable(size_t _index) const;
 
 	size_t m_constraintCounter = 0;
-	size_t m_internalVariableCounte = 0;
+	size_t m_internalVariableCounter = 0;
 	std::vector<State> m_state{{State{}}};
 	LPSolver m_lpSolver;
 };
