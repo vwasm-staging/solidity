@@ -279,9 +279,52 @@ BOOST_AUTO_TEST_CASE(boolean_complex)
 	solver.addAssertion(a || b);
 	solver.addAssertion(b == !a);
 	solver.addAssertion(b == (x < 2));
-	feasible({{x, "0"}, {y, "3"}});
+	feasible({{a, "1"}, {b, "0"}, {x, "5"}, {y, "2"}});
 	solver.addAssertion(a && b);
 	infeasible();
+}
+
+BOOST_AUTO_TEST_CASE(magic_square)
+{
+	vector<Expression> vars;
+	for (size_t i = 0; i < 9; i++)
+		vars.push_back(variable(string{static_cast<char>('a' + i)}));
+	for (Expression const& var: vars)
+		solver.addAssertion(1 <= var && var <= 9);
+	// If we assert all to be mutually distinct, the problems gets too large.
+	for (size_t i = 0; i < 9; i++)
+		for (size_t j = i + 7; j < 9; j++)
+			solver.addAssertion(vars[i] != vars[j]);
+	for (size_t i = 0; i < 4; i++)
+		solver.addAssertion(vars[i] != vars[i + 1]);
+	for (size_t i = 0; i < 3; i++)
+		solver.addAssertion(vars[i] + vars[i + 3] + vars[i + 6] == 15);
+	for (size_t i = 0; i < 9; i += 3)
+		solver.addAssertion(vars[i] + vars[i + 1] + vars[i + 2] == 15);
+	feasible({
+		{vars[0], "1"}, {vars[1], "0"}, {vars[2], "5"},
+		{vars[3], "1"}, {vars[4], "0"}, {vars[5], "5"},
+		{vars[6], "1"}, {vars[7], "0"}, {vars[8], "5"}
+	});
+}
+
+BOOST_AUTO_TEST_CASE(boolean_complex_2)
+{
+	Expression x = variable("x");
+	Expression y = variable("y");
+	Expression a = booleanVariable("a");
+	Expression b = booleanVariable("b");
+	solver.addAssertion(x != 20);
+	feasible({{x, "19"}});
+	solver.addAssertion(x <= 5 || (x > 7 && x != 8));
+	solver.addAssertion(a = (x == 9));
+	feasible({{a, "1"}, {b, "0"}, {x, "5"}});
+//	solver.addAssertion(!a || (x == 10));
+//	solver.addAssertion(b == !a);
+//	solver.addAssertion(b == (x < 200));
+//	feasible({{a, "1"}, {b, "0"}, {x, "5"}});
+//	solver.addAssertion(a && b);
+//	infeasible();
 }
 
 

@@ -587,6 +587,7 @@ bool removeFixedVariables(SolvingState& _state, map<string, rational>& _model, b
 			return false; // Infeasible.
 		if (upper != lower)
 			continue;
+		// cout << "Fixing " << _state.variableNames.at(index) << " to " << lower << endl;
 		_model[_state.variableNames.at(index)] = lower;
 		//variablesToRemove.insert(index);
 		_state.bounds[index] = {};
@@ -1033,21 +1034,20 @@ void BooleanLPSolver::addAssertion(Expression const& _expr)
 	else if (_expr.name == "or")
 	{
 		// We could try to parse a full clause here.
-		optional<Literal> left = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(0));
-		optional<Literal> right = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(1));
-		solAssert(left && right, "");
-		if (left->kind == Literal::Constraint && right->kind == Literal::Constraint)
+		Literal left = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(0));
+		Literal right = parseLiteralOrReturnEqualBoolean(_expr.arguments.at(1));
+		if (left.kind == Literal::Constraint && right.kind == Literal::Constraint)
 		{
 			// We cannot have more than one constraint per clause.
-			*left = *parseLiteral(declareInternalBoolean());
-			addBooleanEquality(*left, _expr.arguments.at(0));
+			right = *parseLiteral(declareInternalBoolean());
+			addBooleanEquality(right, _expr.arguments.at(1));
 		}
-		m_state.back().clauses.emplace_back(Clause{vector<Literal>{*left, *right}});
+		m_state.back().clauses.emplace_back(Clause{vector<Literal>{left, right}});
 	}
 	else if (_expr.name == "not")
 	{
-		if (optional<Literal> inner = parseLiteral(_expr.arguments.at(0)))
-			m_state.back().clauses.emplace_back(Clause{vector<Literal>{negate(*inner)}});
+		Literal l = negate(parseLiteralOrReturnEqualBoolean(_expr.arguments.at(0)));
+		m_state.back().clauses.emplace_back(Clause{vector<Literal>{l}});
 	}
 	else if (_expr.name == "<=")
 	{
@@ -1099,29 +1099,33 @@ pair<CheckResult, map<string, rational>> LPSolver::check(SolvingState _state)
 		solAssert(!split.constraints.empty(), "");
 		solAssert(split.variableNames.size() >= 2, "");
 
-		//cout << "Split off:\n" << toString(split) << endl;
-		//cout << "----------------------------------------" << endl;
+		// cout << "Split off:\n" << split.toString() << endl;
+		// cout << "----------------------------------------" << endl;
 
 		LPResult lpResult;
 		vector<rational> solution;
 		auto it = m_cache.find(split);
 		if (it != m_cache.end())
 		{
-			//cout << "Cache hit for" << endl;// << toString(split) << endl;
-			lpResult = it->second;
+			// cout << "Cache hit for" << split.toString() << endl;
+			tie(lpResult, solution) = it->second;
 		}
 		else
 		{
-			//cout << "Cache miss" << endl;//it for" << endl;// << toString(split) << endl;
+			// cout << "Cache miss for" << split.toString() << endl;
 			SolvingState orig = split;
 			if (!boundsToConstraints(split))
 				lpResult = LPResult::Infeasible;
 			else
 			{
-				//cout << "simplex query with " << split.variableNames.size() << " variables" << endl;
+				// cout << "simplex query with " << split.variableNames.size() << " variables" << endl;
 				tie(lpResult, solution) = simplex(split.constraints, vector<rational>(1, rational(bigint(0))) + vector<rational>(split.constraints.front().data.size() - 1, rational(bigint(1))));
 			}
-			m_cache.emplace(move(orig), lpResult);
+			m_cache.emplace(move(orig), make_pair(lpResult, solution));
+			// cout << "simplex model: " <<endl;
+			// for (auto const& value: solution)
+				// cout << value << ", ";
+			// cout << endl;
 		}
 
 		switch (lpResult)
@@ -1242,10 +1246,7 @@ optional<Literal> BooleanLPSolver::parseLiteral(smtutil::Expression const& _expr
 			};
 	}
 	else if (_expr.name == "not")
-	{
-		if (optional<Literal> inner = parseLiteral(_expr.arguments.at(0)))
-			return negate(move(*inner));
-	}
+		return negate(parseLiteralOrReturnEqualBoolean(_expr.arguments.at(0)));
 	else if (_expr.name == "<=")
 	{
 		optional<vector<rational>> left = parseLinearSum(_expr.arguments.at(0));
@@ -1297,8 +1298,8 @@ Literal BooleanLPSolver::negate(Literal const& _lit)
 
 Literal BooleanLPSolver::parseLiteralOrReturnEqualBoolean(Expression const& _expr)
 {
-	if (_expr.arguments.empty() && isBooleanVariable(_expr.name))
-		return *parseLiteral(_expr);
+	if (optional<Literal> literal = parseLiteral(_expr))
+		return *literal;
 	else
 	{
 		Literal newBoolean = *parseLiteral(declareInternalBoolean());
@@ -1432,6 +1433,12 @@ void BooleanLPSolver::addBooleanEquality(Literal const& _left, smtutil::Expressi
 	{
 		Literal a = parseLiteralOrReturnEqualBoolean(_right.arguments.at(0));
 		Literal b = parseLiteralOrReturnEqualBoolean(_right.arguments.at(1));
+		if (a.kind == Literal::Constraint && b.kind == Literal::Constraint)
+		{
+			// We cannot have more than one constraint per clause.
+			b = *parseLiteral(declareInternalBoolean());
+			addBooleanEquality(b, _right.arguments.at(1));
+		}
 
 		if (_right.name == "and")
 		{
@@ -1464,13 +1471,13 @@ void BooleanLPSolver::addBooleanEquality(Literal const& _left, smtutil::Expressi
 // TODO as input we do not need the full solving state, only the bounds
 pair<CheckResult, map<string, rational>> BooleanLPSolver::runDPLL(SolvingState& _solvingState, DPLL _dpll)
 {
-	cout << "Running dpll on" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
+	//cout << "Running dpll on" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
 
 	auto&& [simplifyResult, booleanModel] = _dpll.simplify();
 	if (!simplifyResult)
 		return {CheckResult::UNSATISFIABLE, {}};
 
-	cout << "Simplified to" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
+	//cout << "Simplified to" << endl << toString(_solvingState.bounds) << "\n" << toString(_dpll) << endl;
 
 	CheckResult result = CheckResult::UNKNOWN;
 	map<string, rational> model;
@@ -1478,12 +1485,14 @@ pair<CheckResult, map<string, rational>> BooleanLPSolver::runDPLL(SolvingState& 
 	// and return unsat if it is already unsat.
 	if (_dpll.clauses.empty())
 	{
-		cout << "Invoking LP..." << endl;
+		//cout << "Invoking LP..." << endl;
 		_solvingState.constraints.clear();
 		for (size_t c: _dpll.constraints)
 			_solvingState.constraints.emplace_back(constraint(c));
-		// TODO model for booleans
 		tie(result, model) = m_lpSolver.check(_solvingState);
+		// cout << "Model: " << endl;
+		// for (auto const& [index, value]: model)
+			// cout << index << " = " << value << endl;
 	}
 	else
 	{
@@ -1493,13 +1502,13 @@ pair<CheckResult, map<string, rational>> BooleanLPSolver::runDPLL(SolvingState& 
 		if (_dpll.setVariable(varIndex, true))
 		{
 			booleanModel[varIndex] = true;
-			cout << "Trying " << variableName(varIndex) << " = true\n";
+			// cout << "Trying " << variableName(varIndex) << " = true\n";
 			tie(result, model) = runDPLL(_solvingState, move(_dpll));
 			// TODO actually we should also handle UNKNOWN here.
 		}
-		else if (result != CheckResult::SATISFIABLE)
+		if (result != CheckResult::SATISFIABLE)
 		{
-			cout << "Trying " << variableName(varIndex) << " = false\n";
+			// cout << "Trying " << variableName(varIndex) << " = false\n";
 			if (!copy.setVariable(varIndex, false))
 				return {CheckResult::UNSATISFIABLE, {}};
 			booleanModel[varIndex] = false;

@@ -92,7 +92,8 @@ public:
 	std::pair<smtutil::CheckResult, std::map<std::string, boost::rational<bigint>>> check(SolvingState _state);
 
 private:
-	std::map<SolvingState, LPResult> m_cache;
+	// TODO do we need to cache the model?
+	std::map<SolvingState, std::pair<LPResult, std::vector<boost::rational<bigint>>>> m_cache;
 };
 
 struct DPLL
