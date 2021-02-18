@@ -629,12 +629,11 @@ bool removeEmptyColumns(SolvingState& _state, map<string, rational>& _model, boo
 		{
 			variablesToRemove.insert(i);
 			// TODO actually it is unbounded if _state.bounds.at(i)[1] is nullopt.
-			_model[_state.variableNames.at(i)] =
-				_state.bounds.at(i)[1] ?
-				*_state.bounds.at(i)[1] :
-				_state.bounds.at(i)[0] ?
-				*_state.bounds.at(i)[0] :
-				0;
+			if (_state.bounds.at(i)[0] || _state.bounds.at(i)[1])
+				_model[_state.variableNames.at(i)] =
+					_state.bounds.at(i)[1] ?
+					*_state.bounds.at(i)[1] :
+					*_state.bounds.at(i)[0];
 		}
 	if (!variablesToRemove.empty())
 	{
