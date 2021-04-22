@@ -40,12 +40,12 @@ contract Test {
 // compileViaYul: also
 // ----
 // test() -> 24
-// gas irOptimized: 216291
+// gas irOptimized: 215654
 // gas legacy: 215533
 // gas legacyOptimized: 214947
 // test1() -> 3
 // test2() -> 6
 // test3() -> 24
-// gas irOptimized: 122838
+// gas irOptimized: 122242
 // gas legacy: 122795
 // gas legacyOptimized: 121883

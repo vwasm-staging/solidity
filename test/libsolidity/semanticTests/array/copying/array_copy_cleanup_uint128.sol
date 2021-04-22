@@ -23,6 +23,6 @@ contract C {
 // compileViaYul: also
 // ----
 // f() -> true
-// gas irOptimized: 107258
+// gas irOptimized: 107143
 // gas legacy: 107335
 // gas legacyOptimized: 105857

@@ -38,5 +38,5 @@ contract C is B {
 // compileViaYul: also
 // ----
 // test() -> 5, 10
-// gas irOptimized: 92612
+// gas irOptimized: 89313
 // gas legacy: 100441
