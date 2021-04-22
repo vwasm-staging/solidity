@@ -312,20 +312,6 @@ std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>> 
 	return {make_shared<evmasm::Assembly>(assembly), {}};
 }
 
-shared_ptr<evmasm::Assembly> AssemblyStack::assembleEVM() const
-{
-	yulAssert(m_analysisSuccessful, "");
-	yulAssert(m_parserResult, "");
-	yulAssert(m_parserResult->code, "");
-	yulAssert(m_parserResult->analysisInfo, "");
-
-	evmasm::Assembly assembly;
-	EthAssemblyAdapter adapter(assembly);
-	compileEVM(adapter, m_optimiserSettings.optimizeStackAllocation);
-
-	return make_shared<evmasm::Assembly>(assembly);
-}
-
 string AssemblyStack::print() const
 {
 	yulAssert(m_parserResult, "");

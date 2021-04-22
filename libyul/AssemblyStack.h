@@ -107,10 +107,6 @@ public:
 	std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
 		assembleEVM(std::optional<std::string_view> _deployName = {}) const;
 
-	/// Return the underling assembler object.
-	/// Only available for EVM.
-	std::shared_ptr<evmasm::Assembly> assembleEVM() const;
-
 	/// @returns the errors generated during parsing, analysis (and potentially assembly).
 	langutil::ErrorList const& errors() const { return m_errors; }
 

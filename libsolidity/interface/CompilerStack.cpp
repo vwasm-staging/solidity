@@ -1353,7 +1353,9 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 
 	// TODO: support passing metadata
 	// TODO: use stack.assemble here!
-	compiledContract.evmAssembly = stack.assembleEVM();
+
+	// TODO: pass runtime name
+	tie(compiledContract.evmAssembly, compiledContract.evmRuntimeAssembly) = stack.assembleEVM();
 	solAssert(compiledContract.evmAssembly, "");
 	try
 	{
@@ -1366,10 +1368,8 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 	}
 	solAssert(compiledContract.object.immutableReferences.empty(), "Leftover immutables.");
 
-	if (compiledContract.evmAssembly->numSubs() == 1)
+	if (compiledContract.evmRuntimeAssembly)
 	{
-		compiledContract.evmRuntimeAssembly = make_shared<evmasm::Assembly>(compiledContract.evmAssembly->sub(0));
-		solAssert(compiledContract.evmRuntimeAssembly, "");
 		try
 		{
 			// Assemble runtime object.
