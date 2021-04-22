@@ -274,7 +274,7 @@ std::pair<MachineAssemblyObject, MachineAssemblyObject> AssemblyStack::assembleW
 	return {std::move(creationObject), std::move(deployedObject)};
 }
 
-std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>> AssemblyStack::assembleEVMWithDeployed(optional<string_view> _deployName) const
+std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>> AssemblyStack::assembleEVM(optional<string_view> _deployName) const
 {
 	yulAssert(m_analysisSuccessful, "");
 	yulAssert(m_parserResult, "");

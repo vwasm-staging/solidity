@@ -105,7 +105,7 @@ public:
 	/// a second object that is the runtime code.
 	/// Only available for EVM.
 	std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
-		assembleEVMWithDeployed(std::optional<std::string_view> _deployName = {}) const;
+		assembleEVM(std::optional<std::string_view> _deployName = {}) const;
 
 	/// Return the underling assembler object.
 	/// Only available for EVM.
