@@ -1352,14 +1352,13 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 	//cout << yul::AsmPrinter{}(*stack.parserResult()->code) << endl;
 
 	// TODO: support passing metadata
-	// TODO: use stack.assemble here!
 
 	// TODO: pass runtime name
 	tie(compiledContract.evmAssembly, compiledContract.evmRuntimeAssembly) = stack.assembleEVM();
 	solAssert(compiledContract.evmAssembly, "");
 	try
 	{
-		// Assemble deployment (incl. runtime)  object.
+		// Assemble deployment (incl. runtime) object.
 		compiledContract.object = compiledContract.evmAssembly->assemble();
 	}
 	catch(evmasm::AssemblyException const&)
@@ -1368,21 +1367,16 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 	}
 	solAssert(compiledContract.object.immutableReferences.empty(), "Leftover immutables.");
 
-	if (compiledContract.evmRuntimeAssembly)
+	solAssert(compiledContract.evmRuntimeAssembly, "");
+	try
 	{
-		try
-		{
-			// Assemble runtime object.
-			compiledContract.runtimeObject = compiledContract.evmRuntimeAssembly->assemble();
-		}
-		catch(evmasm::AssemblyException const&)
-		{
-			solAssert(false, "Assembly exception for deployed bytecode");
-		}
+		// Assemble runtime object.
+		compiledContract.runtimeObject = compiledContract.evmRuntimeAssembly->assemble();
 	}
-
-	// TODO: refactor assemblyItems, runtimeAssemblyItems, generatedSources,
-	//       assemblyString, assemblyJSON, and functionEntryPoints to work with this code path
+	catch(evmasm::AssemblyException const&)
+	{
+		solAssert(false, "Assembly exception for deployed bytecode");
+	}
 
 	// Throw a warning if EIP-170 limits are exceeded:
 	//   If contract creation returns data with length greater than 0x6000 (214 + 213) bytes,
