@@ -55,6 +55,7 @@
 #include <libsolidity/interface/Version.h>
 #include <libsolidity/parsing/Parser.h>
 
+#include <libsolidity/codegen/ir/Common.h>
 #include <libsolidity/codegen/ir/IRGenerator.h>
 
 #include <libyul/YulString.h>
@@ -1353,8 +1354,7 @@ void CompilerStack::generateEVMFromIR(ContractDefinition const& _contract)
 
 	// TODO: support passing metadata
 
-	// TODO: pass runtime name
-	tie(compiledContract.evmAssembly, compiledContract.evmRuntimeAssembly) = stack.assembleEVM();
+	tie(compiledContract.evmAssembly, compiledContract.evmRuntimeAssembly) = stack.assembleEVM(IRNames::deployedObject(_contract));
 	solAssert(compiledContract.evmAssembly, "");
 	try
 	{
