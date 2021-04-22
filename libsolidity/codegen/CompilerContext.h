@@ -278,7 +278,10 @@ public:
 	void appendAuxiliaryData(bytes const& _data) { m_asm->appendAuxiliaryDataToEnd(_data); }
 
 	/// Run optimisation step.
-	void optimise(OptimiserSettings const& _settings) { m_asm->optimise(translateOptimiserSettings(_settings)); }
+	void optimise(OptimiserSettings const& _settings)
+	{
+		m_asm->optimise(evmasm::Assembly::OptimiserSettings::translate(_settings, m_evmVersion));
+	}
 
 	/// @returns the runtime context if in creation mode and runtime context is set, nullptr otherwise.
 	CompilerContext* runtimeContext() const { return m_runtimeContext; }
@@ -308,8 +311,6 @@ public:
 private:
 	/// Updates source location set in the assembly.
 	void updateSourceLocation();
-
-	evmasm::Assembly::OptimiserSettings translateOptimiserSettings(OptimiserSettings const& _settings);
 
 	/**
 	 * Helper class that manages function labels and ensures that referenced functions are

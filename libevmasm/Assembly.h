@@ -18,6 +18,8 @@
 
 #pragma once
 
+#include <libsolidity/interface/OptimiserSettings.h>
+
 #include <libevmasm/Instruction.h>
 #include <liblangutil/SourceLocation.h>
 #include <libevmasm/AssemblyItem.h>
@@ -124,6 +126,24 @@ public:
 		/// This specifies an estimate on how often each opcode in this assembly will be executed,
 		/// i.e. use a small value to optimise for size and a large value to optimise for runtime gas usage.
 		size_t expectedExecutionsPerDeployment = 200;
+
+		static OptimiserSettings translate(
+			solidity::frontend::OptimiserSettings const& _settings,
+			solidity::langutil::EVMVersion _evmVersion
+		)
+		{
+			return OptimiserSettings{
+				/* isCreation */ true,
+				_settings.runInliner,
+				_settings.runJumpdestRemover,
+				_settings.runPeephole,
+				_settings.runDeduplicate,
+				_settings.runCSE,
+				_settings.runConstantOptimiser,
+				_evmVersion,
+				_settings.expectedExecutionsPerDeployment,
+			};
+		}
 	};
 
 	/// Modify and return the current assembly such that creation and execution gas usage
