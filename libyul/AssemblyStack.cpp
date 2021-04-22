@@ -274,6 +274,44 @@ std::pair<MachineAssemblyObject, MachineAssemblyObject> AssemblyStack::assembleW
 	return {std::move(creationObject), std::move(deployedObject)};
 }
 
+std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>> AssemblyStack::assembleEVMWithDeployed(optional<string_view> _deployName) const
+{
+	yulAssert(m_analysisSuccessful, "");
+	yulAssert(m_parserResult, "");
+	yulAssert(m_parserResult->code, "");
+	yulAssert(m_parserResult->analysisInfo, "");
+
+	evmasm::Assembly assembly;
+	EthAssemblyAdapter adapter(assembly);
+	compileEVM(adapter, m_optimiserSettings.optimizeStackAllocation);
+
+	optional<size_t> subIndex;
+
+	// Pick matching assembly if name was given
+	if (_deployName.has_value())
+	{
+		for (size_t i = 0; i < assembly.numSubs(); i++)
+			if (assembly.sub(i).name() == _deployName)
+			{
+				subIndex = i;
+				break;
+			}
+
+		solAssert(subIndex.has_value(), "Failed to find object to be deployed.");
+	}
+	// Otherwise use heuristic: If there is a single sub-assembly, this is likely the object to be deployed.
+	else if (assembly.numSubs() == 1)
+		subIndex = 0;
+
+	if (subIndex.has_value())
+	{
+		evmasm::Assembly& runtimeAssembly = assembly.sub(*subIndex);
+		return {make_shared<evmasm::Assembly>(assembly), make_shared<evmasm::Assembly>(runtimeAssembly)};
+	}
+
+	return {make_shared<evmasm::Assembly>(assembly), {}};
+}
+
 shared_ptr<evmasm::Assembly> AssemblyStack::assembleEVM() const
 {
 	yulAssert(m_analysisSuccessful, "");

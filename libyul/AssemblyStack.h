@@ -98,7 +98,14 @@ public:
 	/// In addition to the value returned by @a assemble, returns
 	/// a second object that is the runtime code.
 	/// Only available for EVM.
-	std::pair<MachineAssemblyObject, MachineAssemblyObject> assembleWithDeployed(std::optional<std::string_view> _deployeName = {}) const;
+	std::pair<MachineAssemblyObject, MachineAssemblyObject> assembleWithDeployed(std::optional<std::string_view> _deployName = {}) const;
+
+	/// Run the assembly step (should only be called after parseAndAnalyze).
+	/// In addition to the value returned by @a assemble, returns
+	/// a second object that is the runtime code.
+	/// Only available for EVM.
+	std::pair<std::shared_ptr<evmasm::Assembly>, std::shared_ptr<evmasm::Assembly>>
+		assembleEVMWithDeployed(std::optional<std::string_view> _deployName = {}) const;
 
 	/// Return the underling assembler object.
 	/// Only available for EVM.
