@@ -181,8 +181,78 @@ vector<SideEffectHook> SemanticTest::makeSideEffectHooks() const
 				return result;
 			}
 			return {};
+		},
+		[this](FunctionCall const& _call) -> vector<string>
+		{
+			return eventSideEffectHook(_call);
 		}
 	};
+}
+
+vector<string> SemanticTest::eventSideEffectHook(FunctionCall const&) const
+{
+	static ABIType abiType(ABIType::Type::Hex);
+	vector<string> sideEffects;
+	vector<LogRecord> recordedLogs = ExecutionFramework::recordedLogs();
+	for (auto const& log: recordedLogs)
+	{
+		optional<EventInformation> event;
+		if (!log.topics.empty())
+			event = findEvent(log.topics[0]);
+		if (event.has_value())
+			soltestAssert(event.value().indexedTypes.size() == log.topics.size() - 1, "");
+
+		stringstream sideEffect;
+		sideEffect << "emit ";
+		if (event.has_value())
+			sideEffect << event.value().signature;
+		else
+			sideEffect << "<anonymous>";
+
+		if (m_contractAddress != log.creator)
+			sideEffect << " creator=0x" << log.creator;
+
+		vector<string> eventStrings;
+		for (auto& topic: log.topics)
+			if ((event.has_value() && topic != *log.topics.begin()) || !event.has_value())
+				eventStrings.push_back("#" + BytesUtils::formatBytes(topic.asBytes(), abiType));
+
+		string data{util::toHex(log.data)};
+		soltestAssert(data.size() % 64 == 0, "");
+		for (size_t index = 0; index < data.size() / 64; ++index)
+			eventStrings.emplace_back(BytesUtils::formatBytes(fromHex(data.substr(index * 64, 64)), abiType));
+
+		if (!eventStrings.empty())
+			sideEffect << ": ";
+		sideEffect << joinHumanReadable(eventStrings);
+		sideEffects.emplace_back(sideEffect.str());
+	}
+	return sideEffects;
+}
+
+optional<EventInformation> SemanticTest::findEvent(util::h256 const& hash) const
+{
+	optional<EventInformation> result;
+	for (auto& contractName: m_compiler.contractNames())
+	{
+		auto& contract = m_compiler.contractDefinition(contractName);
+		for (EventDefinition const* event: contract.events())
+		{
+			FunctionTypePointer eventFunctionType = event->functionType(true);
+			if (keccak256(eventFunctionType->externalSignature()) == hash)
+			{
+				EventInformation eventInfo;
+				eventInfo.signature = eventFunctionType->externalSignature();
+				for (auto const& param: event->parameters())
+					if (param->isIndexed())
+						eventInfo.indexedTypes.emplace_back(param->type()->toString(true));
+					else
+						eventInfo.nonIndexedTypes.emplace_back(param->type()->toString(true));
+				result = eventInfo;
+			}
+		}
+	}
+	return result;
 }
 
 TestCase::TestResult SemanticTest::run(ostream& _stream, string const& _linePrefix, bool _formatted)

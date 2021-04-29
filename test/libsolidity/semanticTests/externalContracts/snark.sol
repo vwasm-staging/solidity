@@ -296,6 +296,7 @@ contract Test {
 // g() -> true
 // pair() -> true
 // verifyTx() -> true
+// ~ emit Verified(string): 0x20, 0x22, 0x5472616e73616374696f6e207375636365737366756c6c792076657269666965, 0x642e000000000000000000000000000000000000000000000000000000000000
 // gas irOptimized: 127916
 // gas legacy: 130571
 // gas legacyOptimized: 100147

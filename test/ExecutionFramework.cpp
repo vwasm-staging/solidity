@@ -282,3 +282,21 @@ bool ExecutionFramework::storageEmpty(h160 const& _addr) const
 	}
 	return true;
 }
+
+vector<solidity::frontend::test::LogRecord> ExecutionFramework::recordedLogs() const
+{
+	size_t logIndex{0};
+	vector<solidity::frontend::test::LogRecord> logs;
+	for (evmc::MockedHost::log_record const& logRecord: m_evmcHost->recorded_logs)
+	{
+		solidity::frontend::test::LogRecord record;
+		record.index = logIndex;
+		record.data = bytes{logRecord.data.begin(), logRecord.data.end()};
+		record.creator = EVMHost::convertFromEVMC(logRecord.creator);
+		for (evmc::bytes32 const& topic: logRecord.topics)
+			record.topics.emplace_back(EVMHost::convertFromEVMC(topic));
+		logs.emplace_back(record);
+		++logIndex;
+	}
+	return logs;
+}
