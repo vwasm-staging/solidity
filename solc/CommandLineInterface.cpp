@@ -23,6 +23,10 @@
  */
 #include <solc/CommandLineInterface.h>
 
+#if defined(SOLC_LSP_TCP)
+#include <solc/LSPTCPTransport.h>
+#endif
+
 #include "solidity/BuildInfo.h"
 #include "license.h"
 
@@ -938,6 +942,13 @@ General Information)").c_str(),
 			"Enables Language Server (LSP) mode. "
 			"This won't compile input but serves as language server to to clients."
 		)
+#if defined(SOLC_LSP_TCP)
+		(
+			"lsp-port",
+			po::value<unsigned>()->value_name("PORT")->default_value(4040),
+			"TCP listening port an LCP client can connect to instead of using stdio."
+		)
+#endif
 		(
 			"lsp-trace",
 			po::value<string>()->value_name("path"),
@@ -1129,9 +1140,13 @@ General Information)").c_str(),
 		// LSP related arguments.
 		"lsp",
 		"lsp-trace",
+#if defined(SOLC_LSP_TCP)
+		"lsp-port",
+#endif
 		// Defaulted arguments must be listed.
 		g_argModelCheckerEngine,
 		g_argModelCheckerTargets,
+		g_strModelCheckerContracts,
 		g_argOptimizeRuns
 	};
 
@@ -1809,6 +1824,19 @@ bool CommandLineInterface::serveLSP()
 	};
 
 	std::unique_ptr<lsp::Transport> transport = make_unique<lsp::JSONTransport>(traceLevel, traceLogger);
+#if defined(SOLC_LSP_TCP)
+	if (m_args.count("lsp-port"))
+	{
+		unsigned const port = m_args.at("lsp-port").as<unsigned>();
+		if (port > 0xFFFF)
+		{
+			sout() << "LSP port number not in valid port range. " << endl;
+			return false;
+		}
+		transport = make_unique<lsp::LSPTCPTransport>(static_cast<unsigned short>(port), traceLevel, traceLogger);
+	}
+#endif
+
 	lsp::LanguageServer languageServer(traceLogger, move(transport));
 	return languageServer.run();
 }
