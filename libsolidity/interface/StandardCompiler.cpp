@@ -437,7 +437,7 @@ std::optional<Json::Value> checkSettingsKeys(Json::Value const& _input)
 
 std::optional<Json::Value> checkModelCheckerSettingsKeys(Json::Value const& _input)
 {
-	static set<string> keys{"contracts", "engine", "targets", "timeout"};
+	static set<string> keys{"contracts", "divModWithSlacks", "engine", "targets", "timeout"};
 	return checkKeys(_input, keys, "modelChecker");
 }
 
@@ -933,6 +933,14 @@ std::variant<StandardCompiler::InputsAndSettings, Json::Value> StandardCompiler:
 				return formatFatalError("JSONError", "Source contracts must be a non-empty array.");
 		}
 		ret.modelCheckerSettings.contracts = {move(sourceContracts)};
+	}
+
+	if (modelCheckerSettings.isMember("divModWithSlacks"))
+	{
+		auto const& divModWithSlacks = modelCheckerSettings["divModWithSlacks"];
+		if (!divModWithSlacks.isBool())
+			return formatFatalError("JSONError", "settings.modelChecker.divModWithSlacks must be a Boolean.");
+		ret.modelCheckerSettings.divModWithSlacks = divModWithSlacks.asBool();
 	}
 
 	if (modelCheckerSettings.isMember("engine"))

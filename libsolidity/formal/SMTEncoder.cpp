@@ -1874,7 +1874,8 @@ pair<smtutil::Expression, smtutil::Expression> SMTEncoder::divModWithSlacks(
 	IntegerType const& _type
 )
 {
-	return {_left / _right, _left % _right};
+	if (!m_settings.divModWithSlacks)
+		return {_left / _right, _left % _right};
 
 	IntegerType const* intType = &_type;
 	string suffix = "div_mod_" + to_string(m_context.newUniqueId());
@@ -1895,8 +1896,8 @@ pair<smtutil::Expression, smtutil::Expression> SMTEncoder::divModWithSlacks(
 	else // unsigned version
 		m_context.addAssertion(0 <= r && (_right == 0 || r < _right));
 
-	auto divResult = _left / _right;//smtutil::Expression::ite(_right == 0, 0, d);
-	auto modResult = _left % _right;//smtutil::Expression::ite(_right == 0, 0, r);
+	auto divResult = smtutil::Expression::ite(_right == 0, 0, d);
+	auto modResult = smtutil::Expression::ite(_right == 0, 0, r);
 	return {divResult, modResult};
 }
 

@@ -103,6 +103,7 @@ struct ModelCheckerTargets
 struct ModelCheckerSettings
 {
 	ModelCheckerContracts contracts = ModelCheckerContracts::Default();
+	bool divModWithSlacks = true;
 	ModelCheckerEngine engine = ModelCheckerEngine::None();
 	ModelCheckerTargets targets = ModelCheckerTargets::Default();
 	std::optional<unsigned> timeout;

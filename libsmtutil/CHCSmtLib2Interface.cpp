@@ -202,7 +202,7 @@ void CHCSmtLib2Interface::write(string _data)
 
 string CHCSmtLib2Interface::querySolver(string const& _input)
 {
-	cout << _input << "\n\n\n";
+	//cout << _input << "\n\n\n";
 	util::h256 inputHash = util::keccak256(_input);
 	if (m_queryResponses.count(inputHash))
 		return m_queryResponses.at(inputHash);
