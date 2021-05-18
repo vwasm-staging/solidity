@@ -13,11 +13,14 @@ contract C {
 // compileViaYul: also
 // ----
 // pushEmpty(uint256): 128
-// gas irOptimized: 620912
-// gas legacy: 607287
-// gas legacyOptimized: 589048
+// gas irOptimized: 430912
+// gas legacy: 417287
+// gas legacyOptimized: 399048
 // pushEmpty(uint256): 256
-// gas irOptimized: 846064
-// gas legacy: 828983
-// gas legacyOptimized: 802808
-// pushEmpty(uint256): 32768 -> FAILURE # out-of-gas #
+// gas irOptimized: 474164
+// gas legacy: 457083
+// gas legacyOptimized: 430908
+// pushEmpty(uint256): 32768 -> # out-of-gas #
+// gas irOptimized: 98565684
+// gas legacy: 95047675
+// gas legacyOptimized: 90447420
