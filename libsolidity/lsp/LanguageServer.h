@@ -69,7 +69,7 @@ public:
 	/// Compiles the source behind path @p _file and updates the diagnostics pushed to the client.
 	///
 	/// update diagnostics and also pushes any updates to the client.
-	void compileSource(std::string const& _file);
+	void compileSourceAndReport(std::string const& _file);
 
 	/// Loops over incoming messages via the transport layer until shutdown condition is met.
 	///
@@ -106,13 +106,11 @@ protected:
 	// {{{ Client-to-Server messages
 	/// Invoked when the server user-supplied configuration changes (initiated by the client).
 	void changeConfiguration(Json::Value const&);
-	void documentContentUpdated(std::string const& _path, std::string const& _fullContentChange);
-	void documentContentUpdated(std::string const& _path, LineColumnRange _range, std::string const& _text);
 
 	/// Find all semantically equivalent occurrences of the symbol the current cursor is located at.
 	///
 	/// @returns a list of ranges to highlight as well as their use kind (read fraom, written to, other text).
-	std::vector<DocumentHighlight> semanticHighlight(DocumentPosition _documentPosition);
+	std::vector<DocumentHighlight> semanticHighlight(frontend::ASTNode const* _node, std::string const& _path);
 
 	/// Finds all references of the current symbol at the given document position.
 	///
@@ -179,14 +177,7 @@ protected:
 	/// Workspace root directory
 	boost::filesystem::path m_basePath;
 
-	//BEGIN
 	std::unique_ptr<frontend::CompilerStack> m_compilerStack;
-	std::vector<frontend::ImportRemapper::Remapping> m_remappings;
-
-	langutil::EVMVersion m_evmVersion = langutil::EVMVersion::berlin();
-	frontend::RevertStrings m_revertStrings = frontend::RevertStrings::Default;
-	frontend::ModelCheckerSettings m_modelCheckerSettings;
-	//END
 	Json::Value m_settingsObject;
 	frontend::StandardCompiler::InputsAndSettings m_inputsAndSettings;
 };

@@ -54,7 +54,7 @@ string toFileURI(boost::filesystem::path const& _path)
 	return "file://" + _path.generic_string();
 }
 
-optional<string> extractPathFromFileURI(std::string const& _uri)
+optional<string> extractPathFromFileURI(string const& _uri)
 {
 	if (!boost::starts_with(_uri, "file://"))
 		return nullopt;
@@ -94,15 +94,6 @@ Json::Value toJson(boost::filesystem::path const& _basePath, SourceLocation cons
 	item["uri"] = toFileURI(_basePath / boost::filesystem::path(_location.source->name()));
 	item["range"] = toJsonRange(_location);
 	return item;
-}
-
-std::pair<size_t, size_t> offsetsOf(std::string const& _text, LineColumnRange _range) noexcept
-{
-	auto const start = CharStream::translateLineColumnToPosition(_text, _range.start.line, _range.start.column);
-	auto const end = CharStream::translateLineColumnToPosition(_text, _range.end.line, _range.end.column);
-	solAssert(start.has_value(), "");
-	solAssert(end.has_value(), "");
-	return std::pair{size_t(start.value()), size_t(end.value())};
 }
 
 constexpr int toDiagnosticSeverity(Error::Type _errorType)
@@ -173,90 +164,9 @@ DocumentPosition LanguageServer::extractDocumentPosition(Json::Value const& _jso
 void LanguageServer::changeConfiguration(Json::Value const& _settings)
 {
 	m_settingsObject = _settings;
-
-	if (_settings["evm"].isString())
-		if (auto const evmVersionOpt = EVMVersion::fromString(_settings["evm"].asString()); evmVersionOpt.has_value())
-			m_evmVersion = evmVersionOpt.value();
-
-	if (_settings["revertStrings"].isString())
-		m_revertStrings = revertStringsFromString(_settings["revertStrings"].asString()).value_or(RevertStrings::Default);
-
-	if (_settings["remapping"].isArray())
-	{
-		for (auto const& element: _settings["remapping"])
-		{
-			if (element.isString())
-			{
-				if (auto remappingOpt = ImportRemapper::parseRemapping(element.asString()); remappingOpt.has_value())
-					m_remappings.emplace_back(move(remappingOpt.value()));
-				else
-					trace("Failed to parse remapping: '"s + element.asString() + "'");
-			}
-		}
-	}
-
-	static string_view constexpr strModelCheckerContracts = "model-checker-contracts";
-	static string_view constexpr strModelCheckerEngine = "model-checker-engine";
-	static string_view constexpr strModelCheckerTargets = "model-checker-targets";
-	static string_view constexpr strModelCheckerTimeout = "model-checker-timeout";
-
-	if (_settings[strModelCheckerContracts.data()].isString())
-	{
-		string contractsStr = _settings[strModelCheckerContracts.data()].as<string>();
-		optional<ModelCheckerContracts> contracts = ModelCheckerContracts::fromString(contractsStr);
-		if (contracts)
-			m_modelCheckerSettings.contracts = move(*contracts);
-		else
-			log(fmt::format("Invalid option for {}: {}", strModelCheckerContracts, contractsStr));
-	}
-
-	if (_settings[strModelCheckerEngine.data()].isString())
-	{
-		string engineStr = _settings[strModelCheckerEngine.data()].as<string>();
-		optional<ModelCheckerEngine> engine = ModelCheckerEngine::fromString(engineStr);
-		if (engine)
-			m_modelCheckerSettings.engine = *engine;
-		else
-			log(fmt::format("Invalid for {}: {}", strModelCheckerEngine, engineStr));
-	}
-
-	if (_settings[strModelCheckerTargets.data()].isString())
-	{
-		string targetsStr = _settings[strModelCheckerTargets.data()].as<string>();
-		optional<ModelCheckerTargets> targets = ModelCheckerTargets::fromString(targetsStr);
-		if (targets)
-			m_modelCheckerSettings.targets = *targets;
-		else
-			log(fmt::format("Invalid for {}: {}", strModelCheckerTargets, targetsStr));
-	}
-
-	if (_settings[strModelCheckerTimeout.data()].isUInt())
-		m_modelCheckerSettings.timeout = _settings[strModelCheckerTargets.data()].asUInt();
 }
 
-void LanguageServer::documentContentUpdated(string const& _path, LineColumnRange _range, string const& _replacementText)
-{
-	auto file = m_fileReader->sourceCodes().find(_path);
-	if (file == m_fileReader->sourceCodes().end())
-		return;
-
-	string buffer = file->second;
-	auto const [start, end] = offsetsOf(buffer, _range);
-	buffer.replace(start, end - start, _replacementText);
-	m_fileReader->setSource(_path, move(buffer));
-}
-
-void LanguageServer::documentContentUpdated(string const& _path, string const& _replacementText)
-{
-	auto file = m_fileReader->sourceCodes().find(_path);
-	if (file == m_fileReader->sourceCodes().end())
-		return;
-
-	m_fileReader->setSource(_path, _replacementText);
-	compileSource(_path);
-}
-
-bool LanguageServer::compile(std::string const& _path)
+bool LanguageServer::compile(string const& _path)
 {
 	// TODO: optimize! do not recompile if nothing has changed (file(s) not flagged dirty).
 
@@ -264,38 +174,30 @@ bool LanguageServer::compile(std::string const& _path)
 	if (i == m_fileReader->sourceCodes().end())
 	{
 		log("source code not found for path: " + _path);
+		log(fmt::format("Available: {}", m_fileReader->sourceCodes().size()));
+		for (auto const& x: m_fileReader->sourceCodes())
+		{
+			log(fmt::format(" - file: {}", x.first));
+		}
 		return false;
 	}
 
-#if 0 // old way
+	// Json::Value jsonInput;
+	// jsonInput.copy(m_settingsObject);
+
 	m_compilerStack.reset();
 	m_compilerStack = make_unique<CompilerStack>(bind(&FileReader::readFile, ref(*m_fileReader), _1, _2));
-
-	m_compilerStack->setOptimiserSettings(settings);
-	m_compilerStack->setParserErrorRecovery(false);
-	m_compilerStack->setRevertStringBehaviour(m_revertStrings);
-	m_compilerStack->setSources(m_fileReader->sourceCodes());
-	m_compilerStack->setRemappings(m_remappings);
-	m_compilerStack->setEVMVersion(m_evmVersion);
-	m_compilerStack->setModelCheckerSettings(m_modelCheckerSettings);
-
-#else // new way
-	Json::Value jsonInput;
-	jsonInput.copy(m_settingsObject);
 
 	StandardCompiler::InputsAndSettings inputsAndSettings = m_inputsAndSettings;
 	inputsAndSettings.sources = m_fileReader->sourceCodes();
 	StandardCompiler::configure(inputsAndSettings, *m_compilerStack);
-
-	OptimiserSettings settings = OptimiserSettings::standard(); // TODO: get from config (might be useful for inspecting generated IR on hover)
-#endif
 
 	m_compilerStack->compile(CompilerStack::State::AnalysisPerformed);
 
 	return true;
 }
 
-void LanguageServer::compileSource(std::string const& _path)
+void LanguageServer::compileSourceAndReport(string const& _path)
 {
 	compile(_path);
 
@@ -336,7 +238,7 @@ void LanguageServer::compileSource(std::string const& _path)
 	m_client->notify("textDocument/publishDiagnostics", params);
 }
 
-frontend::ASTNode const* LanguageServer::requestASTNode(DocumentPosition _filePos)
+ASTNode const* LanguageServer::requestASTNode(DocumentPosition _filePos)
 {
 	if (!m_compilerStack)
 		compile(_filePos.path);
@@ -345,10 +247,10 @@ frontend::ASTNode const* LanguageServer::requestASTNode(DocumentPosition _filePo
 	if (file == m_fileReader->sourceCodes().end())
 		return nullptr;
 
-	if (!m_compilerStack || m_compilerStack->state() < frontend::CompilerStack::AnalysisPerformed)
+	if (!m_compilerStack || m_compilerStack->state() < CompilerStack::AnalysisPerformed)
 		return nullptr;
 
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_filePos.path);
+	SourceUnit const& sourceUnit = m_compilerStack->ast(_filePos.path);
 	auto const sourcePos = sourceUnit.location().source->translateLineColumnToPosition(_filePos.position.line, _filePos.position.column);
 	if (!sourcePos.has_value())
 		return nullptr;
@@ -356,7 +258,7 @@ frontend::ASTNode const* LanguageServer::requestASTNode(DocumentPosition _filePo
 	return locateASTNode(sourcePos.value(), sourceUnit);
 }
 
-optional<SourceLocation> LanguageServer::declarationPosition(frontend::Declaration const* _declaration)
+optional<SourceLocation> LanguageServer::declarationPosition(Declaration const* _declaration)
 {
 	if (!_declaration)
 		return nullopt;
@@ -370,23 +272,23 @@ optional<SourceLocation> LanguageServer::declarationPosition(frontend::Declarati
 	return nullopt;
 }
 
-std::vector<SourceLocation> LanguageServer::findAllReferences(
-	frontend::Declaration const* _declaration,
+vector<SourceLocation> LanguageServer::findAllReferences(
+	Declaration const* _declaration,
 	string const& _sourceIdentifierName,
-	frontend::SourceUnit const& _sourceUnit
+	SourceUnit const& _sourceUnit
 )
 {
-	std::vector<SourceLocation> output;
+	vector<SourceLocation> output;
 	for (DocumentHighlight& highlight: ReferenceCollector::collect(_declaration, _sourceUnit, _sourceIdentifierName))
 		output.emplace_back(move(highlight.location));
 	return output;
 }
 
 void LanguageServer::findAllReferences(
-	frontend::Declaration const* _declaration,
+	Declaration const* _declaration,
 	string const& _sourceIdentifierName,
-	frontend::SourceUnit const& _sourceUnit,
-	std::vector<SourceLocation>& _output
+	SourceUnit const& _sourceUnit,
+	vector<SourceLocation>& _output
 )
 {
 	for (DocumentHighlight& highlight: ReferenceCollector::collect(_declaration, _sourceUnit, _sourceIdentifierName))
@@ -399,7 +301,7 @@ vector<SourceLocation> LanguageServer::references(DocumentPosition _documentPosi
 	if (!sourceNode)
 		return {};
 
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
+	SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
 	vector<SourceLocation> output;
 	if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
@@ -418,13 +320,13 @@ vector<SourceLocation> LanguageServer::references(DocumentPosition _documentPosi
 	return output;
 }
 
-vector<DocumentHighlight> LanguageServer::semanticHighlight(DocumentPosition _documentPosition)
+vector<DocumentHighlight> LanguageServer::semanticHighlight(ASTNode const* _sourceNode, string const& _path)
 {
-	ASTNode const* sourceNode = requestASTNode(_documentPosition);
+	ASTNode const* sourceNode = _sourceNode; // TODO
 	if (!sourceNode)
 		return {};
 
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(_documentPosition.path);
+	SourceUnit const& sourceUnit = m_compilerStack->ast(_path);
 
 	vector<DocumentHighlight> output;
 	if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
@@ -526,7 +428,7 @@ void LanguageServer::handleInitialize(MessageID _id, Json::Value const& _args)
 
 	Json::Value replyArgs;
 	replyArgs["serverInfo"]["name"] = "solc";
-	replyArgs["serverInfo"]["version"] = string(solidity::frontend::VersionNumber);
+	replyArgs["serverInfo"]["version"] = string(VersionNumber);
 	replyArgs["hoverProvider"] = true;
 	replyArgs["capabilities"]["hoverProvider"] = true;
 	replyArgs["capabilities"]["textDocumentSync"]["openClose"] = true;
@@ -563,7 +465,7 @@ void LanguageServer::handleTextDocumentDidOpen(MessageID /*_id*/, Json::Value co
 		path = path.substr(m_basePath.generic_string().size());
 
 	m_fileReader->setSource(path, text);
-	compileSource(path);
+	compileSourceAndReport(path);
 }
 
 void LanguageServer::handleTextDocumentDidChange(MessageID /*_id*/, Json::Value const& _args)
@@ -576,56 +478,76 @@ void LanguageServer::handleTextDocumentDidChange(MessageID /*_id*/, Json::Value 
 		if (!jsonContentChange.isObject()) // Protocol error, will only happen on broken clients, so silently ignore it.
 			continue;
 
-		string const text = jsonContentChange["text"].asString();
+		auto file = m_fileReader->sourceCodes().find(path);
+		if (file == m_fileReader->sourceCodes().end())
+			continue;
 
-		if (jsonContentChange["range"].isObject())
+		string text = jsonContentChange["text"].asString();
+		if (!jsonContentChange["range"].isObject()) // full content update
 		{
-			Json::Value jsonRange = jsonContentChange["range"];
-			LineColumnRange range{};
-			range.start.line = jsonRange["start"]["line"].asInt();
-			range.start.column = jsonRange["start"]["character"].asInt();
-			range.end.line = jsonRange["end"]["line"].asInt();
-			range.end.column = jsonRange["end"]["character"].asInt();
-			documentContentUpdated(path, range, text);
+			m_fileReader->setSource(path, move(text));
+			continue;
 		}
-		else // full content update
-			documentContentUpdated(path, move(text));
+
+		Json::Value const jsonRange = jsonContentChange["range"];
+		int const startLine = jsonRange["start"]["line"].asInt();
+		int const startColumn = jsonRange["start"]["character"].asInt();
+		int const endLine = jsonRange["end"]["line"].asInt();
+		int const endColumn = jsonRange["end"]["character"].asInt();
+
+		string buffer = file->second;
+		optional<int> const startOpt = CharStream::translateLineColumnToPosition(buffer, startLine, startColumn);
+		optional<int> const endOpt = CharStream::translateLineColumnToPosition(buffer, endLine, endColumn);
+		if (!startOpt || !endOpt)
+			continue;
+
+		size_t const start = static_cast<size_t>(startOpt.value());
+		size_t const count = static_cast<size_t>(endOpt.value()) - start; // TODO: maybe off-by-1 bug? +1 missing?
+		buffer.replace(start, count, move(text));
+		m_fileReader->setSource(path, move(buffer));
 	}
 
 	if (!contentChanges.empty())
-		compileSource(path);
+		compileSourceAndReport(path);
 }
 
 void LanguageServer::handleGotoDefinition(MessageID _id, Json::Value const& _args)
 {
 	ASTNode const* sourceNode = requestASTNode(extractDocumentPosition(_args));
-	if (!sourceNode)
-	{
-		Json::Value emptyResponse = Json::arrayValue;
-		m_client->reply(_id, emptyResponse);
-		return;
-	}
-
 	vector<SourceLocation> locations;
-	if (auto const* importDirective = dynamic_cast<ImportDirective const*>(sourceNode))
+	if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	{
+		for (auto const* declaration: allAnnotatedDeclarations(identifier))
+			if (auto location = declarationPosition(declaration); location.has_value())
+				locations.emplace_back(move(location.value()));
+	}
+	else if (auto const* identifierPath = dynamic_cast<IdentifierPath const*>(sourceNode))
+	{
+		if (auto const* declaration = identifierPath->annotation().referencedDeclaration)
+			if (auto location = declarationPosition(declaration); location.has_value())
+				locations.emplace_back(move(location.value()));
+	}
+	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	{
+		auto const location = declarationPosition(memberAccess->annotation().referencedDeclaration);
+		if (location.has_value())
+			locations.emplace_back(location.value());
+	}
+	else if (auto const* importDirective = dynamic_cast<ImportDirective const*>(sourceNode))
 	{
 		auto const& path = *importDirective->annotation().absolutePath;
 		auto const i = m_fileReader->sourceCodes().find(path);
 		if (i != m_fileReader->sourceCodes().end())
 			locations.emplace_back(SourceLocation{0, 0, make_shared<CharStream>("", path)});
 	}
-	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	else if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
 	{
-		for (auto const* declaration: allAnnotatedDeclarations(identifier))
-			if (auto location = declarationPosition(declaration); location.has_value())
-				locations.emplace_back(move(location.value()));
+		if (auto location = declarationPosition(declaration); location.has_value())
+			locations.emplace_back(move(location.value()));
 	}
-	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
+	else if (sourceNode)
 	{
-		auto const declaration = memberAccess->annotation().referencedDeclaration;
-		auto const location = declarationPosition(declaration);
-		if (location.has_value())
-			locations.emplace_back(location.value());
+		log(fmt::format("Could not infer def of {}", typeid(*sourceNode).name()));
 	}
 
 	Json::Value reply = Json::arrayValue;
@@ -634,7 +556,7 @@ void LanguageServer::handleGotoDefinition(MessageID _id, Json::Value const& _arg
 	m_client->reply(_id, reply);
 }
 
-string LanguageServer::symbolHoverInformation(frontend::ASTNode const* _sourceNode)
+string LanguageServer::symbolHoverInformation(ASTNode const* _sourceNode)
 {
 	if (auto const* documented = dynamic_cast<StructurallyDocumented const*>(_sourceNode))
 	{
@@ -661,44 +583,34 @@ string LanguageServer::symbolHoverInformation(frontend::ASTNode const* _sourceNo
 	return {};
 }
 
-
 void LanguageServer::handleTextDocumentHover(MessageID _id, Json::Value const& _args)
 {
 	auto const sourceNode = requestASTNode(extractDocumentPosition(_args));
-	if (!sourceNode)
+	string tooltipText = symbolHoverInformation(sourceNode);
+	if (!tooltipText.empty())
 	{
-		Json::Value emptyResponse = Json::arrayValue;
-		m_client->reply(_id, emptyResponse); // reply with "No references".
+		m_client->reply(_id, Json::nullValue);
 		return;
 	}
-
-	string tooltipText = symbolHoverInformation(sourceNode);
-	if (tooltipText.empty())
-		return;
 
 	Json::Value reply = Json::objectValue;
 	reply["range"] = toJsonRange(sourceNode->location());
 	reply["contents"]["kind"] = "markdown";
 	reply["contents"]["value"] = move(tooltipText);
-
 	m_client->reply(_id, reply);
 }
 
 void LanguageServer::handleTextDocumentHighlight(MessageID _id, Json::Value const& _args)
 {
 	auto const dpos = extractDocumentPosition(_args);
-
-	if (!m_compilerStack)
-		compile(dpos.path);
-
+	ASTNode const* sourceNode = requestASTNode(dpos);
 	Json::Value jsonReply = Json::arrayValue;
-	for (DocumentHighlight const& highlight: semanticHighlight(dpos))
+	for (DocumentHighlight const& highlight: semanticHighlight(sourceNode, dpos.path))
 	{
 		Json::Value item = Json::objectValue;
 		item["range"] = toJsonRange(highlight.location);
 		if (highlight.kind != DocumentHighlightKind::Unspecified)
 			item["kind"] = int(highlight.kind);
-
 		jsonReply.append(item);
 	}
 	m_client->reply(_id, jsonReply);
@@ -715,14 +627,10 @@ void LanguageServer::handleTextDocumentReferences(MessageID _id, Json::Value con
 		m_client->reply(_id, emptyResponse); // reply with "No references".
 		return;
 	}
-	frontend::SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
+	SourceUnit const& sourceUnit = m_compilerStack->ast(dpos.path);
 
 	auto output = vector<SourceLocation>{};
-	if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
-	{
-		output += findAllReferences(declaration, declaration->name(), sourceUnit);
-	}
-	else if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
+	if (auto const* identifier = dynamic_cast<Identifier const*>(sourceNode))
 	{
 		for (auto const* declaration: allAnnotatedDeclarations(identifier))
 			output += findAllReferences(declaration, declaration->name(), sourceUnit);
@@ -734,10 +642,11 @@ void LanguageServer::handleTextDocumentReferences(MessageID _id, Json::Value con
 	}
 	else if (auto const* memberAccess = dynamic_cast<MemberAccess const*>(sourceNode))
 	{
-		if (Declaration const* decl = memberAccess->annotation().referencedDeclaration)
-		{
-			output += findAllReferences(decl, memberAccess->memberName(), sourceUnit);
-		}
+		output += findAllReferences(memberAccess->annotation().referencedDeclaration, memberAccess->memberName(), sourceUnit);
+	}
+	else if (auto const* declaration = dynamic_cast<Declaration const*>(sourceNode))
+	{
+		output += findAllReferences(declaration, declaration->name(), sourceUnit);
 	}
 
 	Json::Value jsonReply = Json::arrayValue;
