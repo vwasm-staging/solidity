@@ -23,6 +23,8 @@
 
 #include <libsolutil/Common.h>
 
+#include <range/v3/view.hpp>
+
 #include <cstdio>
 #include <map>
 #include <memory>
@@ -36,16 +38,42 @@ namespace solidity::smtutil
 struct SMTSolverChoice
 {
 	bool cvc4 = false;
+	bool smtlib2 = false;
 	bool z3 = false;
 
-	static constexpr SMTSolverChoice All() { return {true, true}; }
-	static constexpr SMTSolverChoice CVC4() { return {true, false}; }
-	static constexpr SMTSolverChoice Z3() { return {false, true}; }
-	static constexpr SMTSolverChoice None() { return {false, false}; }
+	static constexpr SMTSolverChoice All() { return {true, true, true}; }
+	static constexpr SMTSolverChoice CVC4() { return {true, false, false}; }
+	static constexpr SMTSolverChoice SMTLIB2() { return {false, true, false}; }
+	static constexpr SMTSolverChoice Z3() { return {false, false, true}; }
+	static constexpr SMTSolverChoice None() { return {false, false, false}; }
+
+	static std::optional<SMTSolverChoice> fromString(std::string const& _solvers)
+	{
+		SMTSolverChoice solvers;
+		for (auto&& s: _solvers | ranges::views::split(',') | ranges::to<std::vector<std::string>>())
+			if (!solvers.setFromString(s))
+				return {};
+
+		return solvers;
+	}
+
+	bool setFromString(std::string const& _solver)
+	{
+		static std::set<std::string> solvers{"cvc4", "smtlib2", "z3"};
+		if (!solvers.count(_solver))
+			return false;
+		if (_solver == "cvc4")
+			cvc4 = true;
+		else if (_solver == "smtlib2")
+			smtlib2 = true;
+		else if (_solver == "z3")
+			z3 = true;
+		return true;
+	}
 
 	bool none() { return !some(); }
-	bool some() { return cvc4 || z3; }
-	bool all() { return cvc4 && z3; }
+	bool some() { return cvc4 || smtlib2 || z3; }
+	bool all() { return cvc4 && smtlib2 && z3; }
 };
 
 enum class CheckResult
