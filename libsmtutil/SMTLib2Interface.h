@@ -66,7 +66,7 @@ public:
 
 	std::map<std::string, SortPointer> variables() { return m_variables; }
 
-	std::vector<std::pair<std::string, std::string>>const& userSorts() const { return m_userSorts; }
+	std::vector<std::pair<std::string, std::string>> const& userSorts() const { return m_userSorts; }
 
 private:
 	void declareFunction(std::string const& _name, SortPointer const& _sort);
